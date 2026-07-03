@@ -1,0 +1,52 @@
+[
+  {
+    "disease": "Powdery Mildew",
+    "symptoms": "White or gray powdery spots on leaves, stems, or flowers.",
+    "treatment": "Remove infected parts. Improve air circulation. Apply neem oil or sulfur-based fungicide."
+  },
+  {
+    "disease": "Root Rot",
+    "symptoms": "Yellowing leaves, stunted growth, mushy black or brown roots.",
+    "treatment": "Reduce watering. Ensure proper drainage. Repot in fresh, well-draining soil. Trim affected roots."
+  },
+  {
+    "disease": "Spider Mites",
+    "symptoms": "Tiny webbing on plants, yellow speckling on leaves.",
+    "treatment": "Wipe leaves with a damp cloth. Increase humidity. Use insecticidal soap or neem oil."
+  },
+  {
+    "disease": "Aphids",
+    "symptoms": "Small green, black, or brown insects clustered on new growth. Sticky honeydew on leaves.",
+    "treatment": "Spray off with a strong stream of water. Use insecticidal soap or neem oil. Introduce ladybugs."
+  },
+  {
+    "disease": "Leaf Spot",
+    "symptoms": "Brown, black, or yellow spots on leaves, sometimes with halos.",
+    "treatment": "Avoid overhead watering. Remove heavily infected leaves. Provide good air circulation. Use a copper-based fungicide if severe."
+  },
+  {
+    "disease": "Botrytis Blight (Gray Mold)",
+    "symptoms": "Grayish-brown fuzzy mold on leaves, stems, or flowers. Often occurs in cool, damp conditions.",
+    "treatment": "Improve air circulation. Reduce humidity. Remove infected plant debris. Avoid overhead watering."
+  },
+  {
+    "disease": "Rust Disease",
+    "symptoms": "Orange, rust-colored, or brown pustules on the undersides of leaves.",
+    "treatment": "Remove and destroy infected leaves. Water at the base of the plant. Apply a sulfur-based or copper fungicide."
+  },
+  {
+    "disease": "Scale Insects",
+    "symptoms": "Small, hard, bump-like insects on stems or leaves. Yellowing leaves and sticky honeydew.",
+    "treatment": "Prune heavily infested parts. Dab pests with rubbing alcohol. Use horticultural oil or neem oil."
+  },
+  {
+    "disease": "Mealybugs",
+    "symptoms": "White, cottony masses on stems, leaf joints, or undersides of leaves.",
+    "treatment": "Wipe off with rubbing alcohol using a cotton swab. Wash plant with insecticidal soap. Apply neem oil."
+  },
+  {
+    "disease": "Fungus Gnats",
+    "symptoms": "Tiny black flies near the soil surface. Seedlings or young plants may wilt.",
+    "treatment": "Allow the top inch of soil to dry between waterings. Use yellow sticky traps. Water with a diluted hydrogen peroxide solution or Bti (Bacillus thuringiensis israelensis)."
+  }
+]

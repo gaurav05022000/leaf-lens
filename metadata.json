@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Leaf Lens",
+  "description": "Plant scanner and disease tracking app",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

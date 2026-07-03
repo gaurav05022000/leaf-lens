@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Leaf Lens</string>
+    <string name="default_web_client_id">YOUR_WEB_CLIENT_ID_HERE.apps.googleusercontent.com</string>
+</resources>
