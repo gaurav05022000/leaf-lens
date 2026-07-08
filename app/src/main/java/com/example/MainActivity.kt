@@ -1,6 +1,7 @@
 package com.example
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -22,10 +23,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.dialog
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
@@ -62,10 +65,12 @@ class MainActivity : ComponentActivity() {
 
         try {
             val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-            if (auth.currentUser == null) {
-                auth.signInAnonymously()
+            if (auth.currentUser != null) {
+                 android.util.Log.d("FirebaseAuth", "Already signed in. UID: ${auth.currentUser?.uid}")
             }
-        } catch(e: Exception) {}
+        } catch(e: Exception) {
+            android.util.Log.e("FirebaseAuth", "Auth error", e)
+        }
 
         try {
             com.example.ui.PointsManager.initialize(this)
@@ -75,12 +80,16 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            if (BuildConfig.REVENUECAT_API_KEY.isNotEmpty() && !BuildConfig.REVENUECAT_API_KEY.contains("fake")) {
+            val rcKey = BuildConfig.REVENUECAT_API_KEY
+            if (rcKey.isNotEmpty() && rcKey.startsWith("goog_")) {
                 com.revenuecat.purchases.Purchases.logLevel = com.revenuecat.purchases.LogLevel.DEBUG
-                Purchases.configure(PurchasesConfiguration.Builder(this, BuildConfig.REVENUECAT_API_KEY).build())
+                com.revenuecat.purchases.Purchases.configure(com.revenuecat.purchases.PurchasesConfiguration.Builder(this, rcKey).build())
+                android.util.Log.d("RevenueCat", "RevenueCat configured with key starting with: ${rcKey.take(8)}")
+            } else {
+                android.util.Log.e("RevenueCat", "RevenueCat API key is empty or invalid. Key must start with 'goog_'. Paywall will not work.")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("RevenueCat", "RevenueCat initialization failed", e)
         }
 
         try {
@@ -122,7 +131,7 @@ fun AppNavigation() {
     
     val startDestination = when {
         !hasSeenOnboarding -> "onboarding"
-        !isUserLoggedIn && appOpenCount > 2 -> "login"
+        !isUserLoggedIn -> "login"
         else -> "main"
     }
 
@@ -133,8 +142,14 @@ fun AppNavigation() {
                     prefs.edit().putBoolean("has_seen_onboarding", true).apply()
                     appOpenCount = 1
                     prefs.edit().putInt("app_open_count", 1).apply()
-                    navController.navigate("main") {
-                        popUpTo("onboarding") { inclusive = true }
+                    if (isUserLoggedIn) {
+                        navController.navigate("main") {
+                            popUpTo("onboarding") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate("login") {
+                            popUpTo("onboarding") { inclusive = true }
+                        }
                     }
                 }
             )
@@ -252,11 +267,19 @@ fun MainScreen(rootNavController: NavController) {
                     onNavigateToPlant = { plantName -> 
                         val encoded = android.net.Uri.encode(plantName)
                         navController.navigate("plantProfile/$encoded") 
-                    }
+                    },
+                    onNavigateToProfile = { navController.navigate("profile") }
                 )
             }
             composable("scan") {
                 ScannerScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("rescan/{plantName}") { backStackEntry ->
+                val plantName = backStackEntry.arguments?.getString("plantName")
+                ScannerScreen(
+                    existingPlantName = plantName,
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -268,14 +291,32 @@ fun MainScreen(rootNavController: NavController) {
                     }
                 )
             }
-            composable("aichat") {
-                com.example.ui.AiChatScreen()
+            composable(
+                route = "aichat?prompt={prompt}",
+                arguments = listOf(androidx.navigation.navArgument("prompt") {
+                    type = androidx.navigation.NavType.StringType
+                    nullable = true
+                })
+            ) { backStackEntry ->
+                val prompt = backStackEntry.arguments?.getString("prompt")
+                com.example.ui.AiChatScreen(
+                    initialPrompt = prompt,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable("plantProfile/{plantName}") { backStackEntry ->
                 val plantName = backStackEntry.arguments?.getString("plantName") ?: ""
                 com.example.ui.PlantProfileScreen(
                     plantName = plantName,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onRescanClick = {
+                        val encoded = android.net.Uri.encode(plantName)
+                        navController.navigate("rescan/$encoded")
+                    },
+                    onChatClick = { prompt ->
+                        val encoded = android.net.Uri.encode(prompt)
+                        navController.navigate("aichat?prompt=$encoded")
+                    }
                 )
             }
             composable("profile") {
@@ -308,22 +349,37 @@ fun MainScreen(rootNavController: NavController) {
             composable("pointsHistory") {
                 com.example.ui.PointsHistoryScreen(onBackClick = { navController.popBackStack() })
             }
-            composable("paywall") {
-                com.revenuecat.purchases.ui.revenuecatui.Paywall(
-                    options = com.revenuecat.purchases.ui.revenuecatui.PaywallOptions.Builder(
-                        dismissRequest = { navController.popBackStack() }
-                    )
-                    .setListener(
-                        object : com.revenuecat.purchases.ui.revenuecatui.PaywallListener {
-                            override fun onPurchaseCompleted(customerInfo: com.revenuecat.purchases.CustomerInfo, storeTransaction: com.revenuecat.purchases.models.StoreTransaction) {
-                                // Add 100 points on successful purchase
-                                com.example.ui.PointsManager.addPoints(100)
-                                navController.popBackStack()
+            dialog("paywall") {
+                if (com.revenuecat.purchases.Purchases.isConfigured) {
+                    com.revenuecat.purchases.ui.revenuecatui.Paywall(
+                        options = com.revenuecat.purchases.ui.revenuecatui.PaywallOptions.Builder(
+                            dismissRequest = { navController.popBackStack() }
+                        )
+                        .setListener(
+                            object : com.revenuecat.purchases.ui.revenuecatui.PaywallListener {
+                                override fun onPurchaseCompleted(customerInfo: com.revenuecat.purchases.CustomerInfo, storeTransaction: com.revenuecat.purchases.models.StoreTransaction) {
+                                    android.util.Log.d("RevenueCat", "Purchase completed")
+                                    com.example.ui.PointsManager.addPoints(100)
+                                    navController.popBackStack()
+                                }
                             }
-                        }
+                        )
+                        .build()
                     )
-                    .build()
-                )
+                } else {
+                    androidx.compose.material3.Card(
+                        modifier = androidx.compose.ui.Modifier.padding(24.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface)
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = androidx.compose.ui.Modifier.padding(24.dp),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            androidx.compose.material3.Text("RevenueCat is not configured.")
+                        }
+                    }
+                }
             }
         }
     }

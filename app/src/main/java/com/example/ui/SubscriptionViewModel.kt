@@ -33,11 +33,13 @@ class SubscriptionViewModel : ViewModel() {
         }
         Purchases.sharedInstance.getCustomerInfo(object : ReceiveCustomerInfoCallback {
             override fun onReceived(customerInfo: CustomerInfo) {
+                android.util.Log.d("RevenueCat", "Customer info received. Active entitlements: ${customerInfo.entitlements.active.keys}")
                 // Check if the user has the "premium" entitlement active
-                _isPremium.value = customerInfo.entitlements["premium"]?.isActive == true
+                _isPremium.value = customerInfo.entitlements["leaflens Pro"]?.isActive == true
             }
 
             override fun onError(error: PurchasesError) {
+                android.util.Log.e("RevenueCat", "Error fetching customer info: ${error.code} - ${error.message} - ${error.underlyingErrorMessage}")
                 _isPremium.value = false
             }
         })
@@ -50,10 +52,12 @@ class SubscriptionViewModel : ViewModel() {
         }
         Purchases.sharedInstance.getOfferings(object : ReceiveOfferingsCallback {
             override fun onReceived(offerings: Offerings) {
+                android.util.Log.d("RevenueCat", "Offerings received. Current offering ID: ${offerings.current?.identifier}")
                 _offerings.value = offerings
             }
 
             override fun onError(error: PurchasesError) {
+                android.util.Log.e("RevenueCat", "Error fetching offerings: ${error.code} - ${error.message} - ${error.underlyingErrorMessage}")
                 _offerings.value = null
             }
         })

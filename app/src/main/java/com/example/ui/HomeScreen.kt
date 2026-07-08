@@ -35,6 +35,7 @@ import com.example.ui.theme.*
 fun HomeScreen(
     onNavigateToScan: () -> Unit,
     onNavigateToPlant: (String) -> Unit,
+    onNavigateToProfile: () -> Unit = {},
     viewModel: HomeViewModel = viewModel()
 ) {
     val plants by viewModel.allPlants.collectAsState()
@@ -94,7 +95,7 @@ fun HomeScreen(
                                 .clip(CircleShape)
                                 .background(SurfaceVariant)
                                 .border(1.dp, TextSecondary.copy(alpha = 0.2f), CircleShape)
-                                .clickable { },
+                                .clickable { onNavigateToProfile() },
                             contentAlignment = Alignment.Center
                         ) {
                             Text("👤", fontSize = 18.sp)

@@ -99,7 +99,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun waterPlant(plant: Plant) {
+    fun waterPlant(plant: Plant, actionTimeMs: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
             val interval = when (plant.wateringLevel) {
                 "High" -> 4L
@@ -107,17 +107,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 else -> 7L
             }
             val updated = plant.copy(
-                nextWateringTimeMs = System.currentTimeMillis() + interval * 86400000L,
+                nextWateringTimeMs = actionTimeMs + interval * 86400000L,
                 wateringScore = 100
             )
             repository.update(updated)
         }
     }
 
-    fun fertilizePlant(plant: Plant) {
+    fun fertilizePlant(plant: Plant, actionTimeMs: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
             val updated = plant.copy(
-                nextFeedingTimeMs = System.currentTimeMillis() + 30L * 86400000L
+                nextFeedingTimeMs = actionTimeMs + 30L * 86400000L
             )
             repository.update(updated)
         }

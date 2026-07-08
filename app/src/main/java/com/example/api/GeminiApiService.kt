@@ -23,32 +23,32 @@ interface GeminiApiService {
 }
 
 object RetrofitClient {
-    private const val BASE_URL = "https://generativelanguage.googleapis.com/"
+    private const val BASE_URL = "https://openrouter.ai/api/"
 
     private val okHttpClient by lazy {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+        val logging = okhttp3.logging.HttpLoggingInterceptor().apply {
+            level = okhttp3.logging.HttpLoggingInterceptor.Level.BODY
         }
-        OkHttpClient.Builder()
+        okhttp3.OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
     private val moshi by lazy {
-        Moshi.Builder()
-            .add(KotlinJsonAdapterFactory())
+        com.squareup.moshi.Moshi.Builder()
+            .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
             .build()
     }
 
-    val service: GeminiApiService by lazy {
-        Retrofit.Builder()
+    val service: OpenRouterApiService by lazy {
+        retrofit2.Retrofit.Builder()
             .baseUrl(BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .addConverterFactory(retrofit2.converter.moshi.MoshiConverterFactory.create(moshi))
             .build()
-            .create(GeminiApiService::class.java)
+            .create(OpenRouterApiService::class.java)
     }
 }

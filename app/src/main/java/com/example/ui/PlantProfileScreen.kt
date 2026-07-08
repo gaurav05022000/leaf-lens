@@ -41,10 +41,43 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun PlantProfileScreen(
     plantName: String, 
     onBack: () -> Unit,
+    onRescanClick: () -> Unit = {},
+    onChatClick: (String) -> Unit = {},
     viewModel: HomeViewModel = viewModel()
 ) {
     val plant by viewModel.getPlantByNameFlow(plantName).collectAsState(initial = null)
     val scrollState = rememberScrollState()
+    
+    var showDatePicker by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf<String?>(null) }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDatePicker = false
+                    val selectedDate = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                    if (pendingAction == "water") {
+                        plant?.let { viewModel.waterPlant(it, selectedDate) }
+                    } else if (pendingAction == "fertilize") {
+                        plant?.let { viewModel.fertilizePlant(it, selectedDate) }
+                    }
+                    pendingAction = null
+                }) {
+                    Text("Confirm")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -87,6 +120,26 @@ fun PlantProfileScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(livePlant.name, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
                             Text(livePlant.species, fontSize = 14.sp, color = TextSecondary)
+                        }
+                        
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Button(
+                                onClick = { onRescanClick() },
+                                colors = ButtonDefaults.buttonColors(containerColor = HeroCardBg),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Rescan")
+                            }
+                            Button(
+                                onClick = { 
+                                    val prompt = "I'm concerned about my ${livePlant.name} (${livePlant.species}). Its health status is currently '${livePlant.healthStatus}'. Can you help?"
+                                    onChatClick(prompt)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Ask AI")
+                            }
                         }
                     }
 
@@ -237,16 +290,21 @@ fun PlantProfileScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Button(
-                                    onClick = { viewModel.waterPlant(livePlant) },
+                                    onClick = { 
+                                        pendingAction = "water"
+                                        showDatePicker = true
+                                    },
                                     modifier = Modifier.weight(1f),
                                     colors = ButtonDefaults.buttonColors(containerColor = HeroCardBg),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text("💧 Water Me", fontSize = 12.sp)
                                 }
-
                                 Button(
-                                    onClick = { viewModel.fertilizePlant(livePlant) },
+                                    onClick = { 
+                                        pendingAction = "fertilize"
+                                        showDatePicker = true
+                                    },
                                     modifier = Modifier.weight(1f),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
                                     shape = RoundedCornerShape(12.dp)

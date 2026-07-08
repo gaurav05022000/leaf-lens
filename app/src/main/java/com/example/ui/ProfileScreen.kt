@@ -28,7 +28,7 @@ import com.example.ui.theme.*
 @Composable
 fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanHistoryClick: () -> Unit = {}, onPointsHistoryClick: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var userName by remember { mutableStateOf("Offline Mode") }
+    var userName by remember { mutableStateOf("User") }
     val scanCount by PointsManager.totalScans.collectAsState()
     val availablePoints by PointsManager.availablePoints.collectAsState()
     
@@ -129,6 +129,8 @@ fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanH
                         } catch(e: Exception) {}
                         try {
                             com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+                            com.example.ui.PointsManager.clearLocalData()
+                            com.example.ui.ScanHistoryManager.clearLocalData()
                         } catch (e: Exception) {}
                         onLogout()
                     },

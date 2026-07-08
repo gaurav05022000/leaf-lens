@@ -31,7 +31,16 @@ object PointsManager {
     private val firestore get() = try { FirebaseFirestore.getInstance() } catch (e: Exception) { null }
     private lateinit var database: AppDatabase
 
+    private var deviceId: String = ""
+    private fun getUserId(): String = auth?.currentUser?.uid ?: deviceId
+
     fun initialize(context: Context) {
+        val prefs = context.getSharedPreferences("flora_points_prefs", Context.MODE_PRIVATE)
+        deviceId = prefs.getString("device_id", null) ?: run {
+            val newId = "device_" + java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("device_id", newId).apply()
+            newId
+        }
         database = AppDatabase.getDatabase(context)
         
         CoroutineScope(Dispatchers.IO).launch {
@@ -49,14 +58,12 @@ object PointsManager {
                 PointTransaction(it.title, it.amount, it.timestamp, it.isEarned) 
             }
 
-            // Sync with Firestore if logged in
+            // Sync with Firestore
             syncFromFirestore()
         }
         
         auth?.addAuthStateListener { firebaseAuth ->
-            if (firebaseAuth.currentUser != null) {
-                syncFromFirestore()
-            }
+            syncFromFirestore()
         }
     }
 
@@ -75,21 +82,21 @@ object PointsManager {
     private fun saveTransaction(trx: PointTransaction) {
         saveTransactionLocal(trx)
         
-        auth?.currentUser?.let { user ->
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val uid = user.uid
-                    val db = firestore ?: return@launch
-                    val map = mapOf(
-                        "title" to trx.title,
-                        "amount" to trx.amount,
-                        "timestamp" to trx.timestamp,
-                        "isEarned" to trx.isEarned
-                    )
-                    db.collection("users").document(uid).collection("point_transactions").add(map).await()
-                } catch (e: Exception) {
-                    Log.e("PointsManager", "Error saving transaction to firestore", e)
-                }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Log.d("PointsManager", "Saving point transaction to Firestore...")
+                val uid = getUserId()
+                val db = firestore ?: return@launch
+                val map = mapOf(
+                    "title" to trx.title,
+                    "amount" to trx.amount,
+                    "timestamp" to trx.timestamp,
+                    "isEarned" to trx.isEarned
+                )
+                db.collection("users").document(uid).collection("point_transactions").add(map).await()
+                Log.d("PointsManager", "Successfully saved transaction to Firestore")
+            } catch (e: Exception) {
+                Log.e("PointsManager", "Error saving transaction to firestore", e)
             }
         }
     }
@@ -114,97 +121,97 @@ object PointsManager {
     }
 
     fun syncFromFirestore() {
-        auth?.currentUser?.let { user ->
-            val uid = user.uid
-            val db = firestore ?: return
-            
-            // Listen for points changes
-            pointsListener?.remove()
-            pointsListener = db.collection("users").document(uid).addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("PointsManager", "Listen failed.", error)
-                    return@addSnapshotListener
-                }
-
-                if (snapshot != null && snapshot.exists() && snapshot.contains("availablePoints") && snapshot.contains("totalScans")) {
-                    val cloudPoints = snapshot.getLong("availablePoints")?.toInt() ?: 0
-                    val cloudScans = snapshot.getLong("totalScans")?.toInt() ?: 0
-                    
-                    // If cloud has advanced, pull
-                    if (cloudScans >= _totalScans.value || cloudPoints != _availablePoints.value) {
-                        CoroutineScope(Dispatchers.IO).launch {
-                            database.localStateDao().updateLocalState(
-                                LocalStateEntity(id = 1, availablePoints = cloudPoints, totalScans = cloudScans, firstRunGranted = true)
-                            )
-                        }
-                        
-                        _availablePoints.value = cloudPoints
-                        _totalScans.value = cloudScans
-                    }
-                } else if (snapshot != null && !snapshot.exists()) {
-                     // initialize document if not exists yet
-                     syncToFirestore()
-                }
+        val uid = getUserId()
+        val db = firestore ?: return
+        
+        // Listen for points changes
+        pointsListener?.remove()
+        pointsListener = db.collection("users").document(uid).addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e("PointsManager", "Listen failed.", error)
+                return@addSnapshotListener
             }
 
-            // Listen for transactions changes
-            trxListener?.remove()
-            trxListener = db.collection("users").document(uid).collection("point_transactions")
-                .addSnapshotListener { trxSnapshot, error ->
-                     if (error != null || trxSnapshot == null) return@addSnapshotListener
-                     
-                     if (!trxSnapshot.isEmpty || _transactions.value.isNotEmpty()) {
-                        val cloudTrx = trxSnapshot.documents.mapNotNull { doc ->
-                           val title = doc.getString("title") ?: ""
-                           val amount = doc.getLong("amount")?.toInt() ?: 0
-                           val ts = doc.getLong("timestamp") ?: 0L
-                           val isEarned = doc.getBoolean("isEarned") ?: false
-                           PointTransaction(title, amount, ts, isEarned)
-                        }
-                        
-                        val localTrx = _transactions.value
-                        val merged = (cloudTrx + localTrx).distinctBy { it.timestamp }.sortedByDescending { it.timestamp }
-                        
-                        _transactions.value = merged
-                        
-                        CoroutineScope(Dispatchers.IO).launch {
-                            database.pointTransactionDao().clearAll()
-                            database.pointTransactionDao().insertTransactions(
-                                merged.map { PointTransactionEntity(title = it.title, amount = it.amount, timestamp = it.timestamp, isEarned = it.isEarned) }
+            if (snapshot != null && snapshot.exists() && snapshot.contains("availablePoints") && snapshot.contains("totalScans")) {
+                val cloudPoints = snapshot.getLong("availablePoints")?.toInt() ?: 0
+                val cloudScans = snapshot.getLong("totalScans")?.toInt() ?: 0
+                
+                // If cloud has advanced, pull
+                if (cloudScans >= _totalScans.value || cloudPoints != _availablePoints.value) {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        database.localStateDao().updateLocalState(
+                            LocalStateEntity(id = 1, availablePoints = cloudPoints, totalScans = cloudScans, firstRunGranted = true)
+                        )
+                    }
+                    
+                    _availablePoints.value = cloudPoints
+                    _totalScans.value = cloudScans
+                }
+            } else if (snapshot != null && !snapshot.exists()) {
+                 if (!snapshot.metadata.isFromCache) {
+                     // initialize document if not exists yet
+                     syncToFirestore()
+                 }
+            }
+        }
+
+        // Listen for transactions changes
+        trxListener?.remove()
+        trxListener = db.collection("users").document(uid).collection("point_transactions")
+            .addSnapshotListener { trxSnapshot, error ->
+                 if (error != null || trxSnapshot == null) return@addSnapshotListener
+                 
+                 if (!trxSnapshot.isEmpty || _transactions.value.isNotEmpty()) {
+                    val cloudTrx = trxSnapshot.documents.mapNotNull { doc ->
+                       val title = doc.getString("title") ?: ""
+                       val amount = doc.getLong("amount")?.toInt() ?: 0
+                       val ts = doc.getLong("timestamp") ?: 0L
+                       val isEarned = doc.getBoolean("isEarned") ?: false
+                       PointTransaction(title, amount, ts, isEarned)
+                    }
+                    
+                    val localTrx = _transactions.value
+                    val merged = (cloudTrx + localTrx).distinctBy { it.timestamp }.sortedByDescending { it.timestamp }
+                    
+                    _transactions.value = merged
+                    
+                    CoroutineScope(Dispatchers.IO).launch {
+                        database.pointTransactionDao().clearAll()
+                        database.pointTransactionDao().insertTransactions(
+                            merged.map { PointTransactionEntity(title = it.title, amount = it.amount, timestamp = it.timestamp, isEarned = it.isEarned) }
+                        )
+                    }
+                    
+                    val cloudTs = cloudTrx.map { it.timestamp }.toSet()
+                    val missingInCloud = localTrx.filter { !cloudTs.contains(it.timestamp) }
+                    missingInCloud.forEach { trx ->
+                        db.collection("users").document(uid).collection("point_transactions").add(
+                            mapOf(
+                                "title" to trx.title,
+                                "amount" to trx.amount,
+                                "timestamp" to trx.timestamp,
+                                "isEarned" to trx.isEarned
                             )
-                        }
-                        
-                        val cloudTs = cloudTrx.map { it.timestamp }.toSet()
-                        val missingInCloud = localTrx.filter { !cloudTs.contains(it.timestamp) }
-                        missingInCloud.forEach { trx ->
-                            db.collection("users").document(uid).collection("point_transactions").add(
-                                mapOf(
-                                    "title" to trx.title,
-                                    "amount" to trx.amount,
-                                    "timestamp" to trx.timestamp,
-                                    "isEarned" to trx.isEarned
-                                )
-                            )
-                        }
+                        )
                     }
                 }
-        }
+            }
     }
 
     private fun syncToFirestore() {
-        auth?.currentUser?.let { user ->
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val uid = user.uid
-                    val db = firestore ?: return@launch
-                    val data = mapOf(
-                        "availablePoints" to _availablePoints.value,
-                        "totalScans" to _totalScans.value
-                    )
-                    db.collection("users").document(uid).set(data, SetOptions.merge()).await()
-                } catch (e: Exception) {
-                    Log.e("PointsManager", "Error updating points", e)
-                }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Log.d("PointsManager", "Syncing points to Firestore...")
+                val uid = getUserId()
+                val db = firestore ?: return@launch
+                val data = mapOf(
+                    "availablePoints" to _availablePoints.value,
+                    "totalScans" to _totalScans.value
+                )
+                db.collection("users").document(uid).set(data, SetOptions.merge()).await()
+                Log.d("PointsManager", "Successfully synced points to Firestore")
+            } catch (e: Exception) {
+                Log.e("PointsManager", "Error updating points", e)
             }
         }
     }

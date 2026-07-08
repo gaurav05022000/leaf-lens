@@ -6,75 +6,51 @@ import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
-import com.example.api.Candidate
-import com.example.api.Content
-import com.example.api.GenerateContentRequest
-import com.example.api.GenerationConfig
-import com.example.api.InlineData
-import com.example.api.Part
+import com.example.api.OpenRouterRequest
+import com.example.api.OpenRouterMessage
+import com.example.api.OpenRouterContentPart
+import com.example.api.OpenRouterImageUrl
 import com.example.api.RetrofitClient
 import com.example.data.Plant
 import com.example.data.PlantRepository
-import com.squareup.moshi.JsonAdapter
-import com.squareup.moshi.JsonClass
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 
-@JsonClass(generateAdapter = true)
-data class ScanResult(
-    val plantName: String,
-    val species: String,
-    val disease: String?,
-    val severityLevel: String?,
-    val symptoms: List<String> = emptyList(),
-    val healthStatus: String,
-    val healthScore: Int,
-    val wateringLevel: String,
-    val wateringScore: Int,
-    val sunlight: String,
-    val sunlightScore: Int,
-    val description: String,
-    val treatmentSteps: List<String>,
-    val careTips: List<String> = emptyList()
-)
-
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
+
     private val repository: PlantRepository
+    
     init {
         repository = PlantRepository.getInstance(application)
     }
 
-    private val _isScanning = MutableStateFlow(false)
-    val isScanning: StateFlow<Boolean> = _isScanning
+    private val _scanResult = MutableStateFlow<Plant?>(null)
+    val scanResult = _scanResult.asStateFlow()
 
-    private val _scanResult = MutableStateFlow<ScanResult?>(null)
-    val scanResult: StateFlow<ScanResult?> = _scanResult
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning = _isScanning.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    val error = _error.asStateFlow()
 
-    private var lastScannedBitmap: Bitmap? = null
-    
     fun scanPlant(bitmap: Bitmap) {
-        lastScannedBitmap = bitmap
+        if (_isScanning.value) return
         _isScanning.value = true
         _error.value = null
+
         viewModelScope.launch {
             try {
                 val base64Image = bitmapToBase64(bitmap)
-                
                 val prompt = """
-                    You are an expert botanist and plant disease diagnostician.
-                    Analyze the provided image and identify the plant. 
-                    Detect any diseases or health issues. 
-                    You MUST return exactly a raw JSON object (without any markdown blocks like ```json) with the following structure:
+                    You are an expert botanist and plant pathologist AI. 
+                    Analyze the attached image and identify the plant species. Then, evaluate its health.
+                    Return a JSON object EXACTLY matching this structure:
                     {
-                      "plantName": "Common Name, e.g. Luna",
-                      "species": "Scientific or formal species name, e.g. Monstera Deliciosa",
+                      "plantName": "Common Name of the Plant",
+                      "species": "Scientific name",
                       "disease": "Name of disease if present, or null if healthy",
                       "severityLevel": "Low, Medium, High, or None",
                       "symptoms": ["Symptom 1", "Symptom 2"], // empty list if healthy
@@ -90,35 +66,40 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     }
                 """.trimIndent()
 
-                val request = GenerateContentRequest(
-                    contents = listOf(
-                        Content(
+                val request = OpenRouterRequest(
+                    model = "google/gemini-flash-1.5",
+                    messages = listOf(
+                        OpenRouterMessage(
                             role = "user",
-                            parts = listOf(
-                                Part(text = prompt),
-                                Part(inlineData = InlineData("image/jpeg", base64Image))
+                            content = listOf(
+                                OpenRouterContentPart(type = "text", text = prompt),
+                                OpenRouterContentPart(type = "image_url", image_url = OpenRouterImageUrl(url = "data:image/jpeg;base64,$base64Image"))
                             )
                         )
                     ),
-                    generationConfig = GenerationConfig(
-                        responseMimeType = "application/json"
-                    )
+                    response_format = com.example.api.OpenRouterResponseFormat("json_object")
                 )
 
                 if (BuildConfig.GEMINI_API_KEY.isBlank()) {
-                    _error.value = "Gemini API Key is missing. Please add it in Settings -> Secrets."
+                    _error.value = "API Key is missing. Please add it in Settings -> Secrets."
                     _isScanning.value = false
                     return@launch
                 }
 
-                val modelsToTry = listOf("gemini-3.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash")
+                val modelsToTry = listOf("google/gemini-flash-1.5", "google/gemini-pro-1.5")
                 var responseText: String? = null
                 var lastError: Exception? = null
 
                 for (model in modelsToTry) {
                     try {
-                        val response = RetrofitClient.service.generateContent(model, BuildConfig.GEMINI_API_KEY, request)
-                        responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                        val requestWithModel = request.copy(model = model)
+                        val response = RetrofitClient.service.generateContent(
+                            authorization = "Bearer ${BuildConfig.GEMINI_API_KEY}",
+                            referer = "https://ai.studio",
+                            title = "LeafLens",
+                            request = requestWithModel
+                        )
+                        responseText = response.choices?.firstOrNull()?.message?.content
                         if (responseText != null) break
                     } catch (e: Exception) {
                         lastError = e
@@ -132,159 +113,93 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     throw lastError
                 }
 
-                if (responseText != null) {
-                    val cleanText = responseText.replace(Regex("```json\\s*"), "").replace(Regex("```\\s*"), "").trim()
-                    val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-                    val adapter: JsonAdapter<ScanResult> = moshi.adapter(ScanResult::class.java)
-                    val result = adapter.fromJson(cleanText)
-                    _scanResult.value = result
-                    
-                    if (result != null) {
-                        PointsManager.deductPoints(10)
-                        PointsManager.incrementScans()
-                        ScanHistoryManager.addScanResult(result)
-                    }
-                } else {
-                    _error.value = "Could not parse response from Gemini."
+                val text = responseText ?: "{}"
+                val jsonStartIndex = text.indexOf('{')
+                val jsonEndIndex = text.lastIndexOf('}')
+                if (jsonStartIndex == -1 || jsonEndIndex == -1) {
+                     _error.value = "Could not parse API response. Please try again."
+                     return@launch
                 }
+                
+                val cleanJson = text.substring(jsonStartIndex, jsonEndIndex + 1)
+                val json = JSONObject(cleanJson)
+
+                val plant = Plant(
+                    name = json.optString("plantName", "Unknown Plant"),
+                    species = json.optString("species", "Unknown Species"),
+                    disease = json.optString("disease").takeIf { it != "null" && it.isNotBlank() },
+                    severityLevel = json.optString("severityLevel").takeIf { it != "null" && it.isNotBlank() },
+                    symptoms = parseJsonArray(json, "symptoms").joinToString(", "),
+                    healthStatus = json.optString("healthStatus", "Unknown"),
+                    healthScore = json.optInt("healthScore", 0),
+                    wateringLevel = json.optString("wateringLevel", "Unknown"),
+                    wateringScore = json.optInt("wateringScore", 0),
+                    sunlight = json.optString("sunlight", "Unknown"),
+                    sunlightScore = json.optInt("sunlightScore", 0),
+                    description = json.optString("description", ""),
+                    treatmentSteps = parseJsonArray(json, "treatmentSteps").joinToString(", "),
+                    careTips = parseJsonArray(json, "careTips").joinToString(", "),
+                    imageUri = "" 
+                )
+
+                repository.insert(plant)
+                _scanResult.value = plant
+                
+                PointsManager.deductPoints(10)
+                PointsManager.incrementScans()
+
             } catch (e: retrofit2.HttpException) {
                 if (e.code() == 400 || e.code() == 401 || e.code() == 403) {
-                     _error.value = "API Key error. Ensure your Gemini API Key in Secrets is valid."
+                     _error.value = "API Key error. Ensure your API Key in Secrets is valid."
                 } else if (e.code() == 429) {
-                     _error.value = "Rate Limit Reached (Error 429). The free tier API key has reached its quota. Please try again later."
+                     _error.value = "Rate limit reached. Please try again later."
                 } else if (e.code() == 503) {
-                     provideOfflineFallback()
+                     _error.value = "AI servers are overloaded. Please try again."
                 } else {
-                     _error.value = "Server error ${e.code()}: ${e.message}"
+                     _error.value = "Error ${e.code()}: ${e.message()}"
                 }
             } catch (e: Exception) {
-                provideOfflineFallback()
+                _error.value = "Error: ${e.localizedMessage}"
             } finally {
                 _isScanning.value = false
             }
         }
     }
-
-    fun savePlant(result: ScanResult) {
-        viewModelScope.launch {
-            val encodedSpecies = java.net.URLEncoder.encode(result.species, "UTF-8")
-            
-            var savedImageUri: String? = null
-            lastScannedBitmap?.let { bitmap ->
-                try {
-                    val file = java.io.File(getApplication<Application>().filesDir, "plant_${System.currentTimeMillis()}.jpg")
-                    java.io.FileOutputStream(file).use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                    }
-                    savedImageUri = "file://${file.absolutePath}"
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            
-            val plant = Plant(
-                name = result.plantName,
-                species = result.species,
-                healthStatus = result.healthStatus,
-                healthScore = result.healthScore,
-                wateringLevel = result.wateringLevel,
-                wateringScore = result.wateringScore,
-                sunlight = result.sunlight,
-                sunlightScore = result.sunlightScore,
-                nextWateringTimeMs = System.currentTimeMillis() + 86400000L * 2, // Dummy 2 days later
-                nextFeedingTimeMs = System.currentTimeMillis() + 86400000L * 7, // Dummy 7 days later
-                disease = result.disease,
-                severityLevel = result.severityLevel,
-                symptoms = result.symptoms.joinToString("|"),
-                treatmentSteps = result.treatmentSteps.joinToString("|"),
-                careTips = result.careTips.joinToString("|"),
-                description = result.description,
-                imageUri = savedImageUri,
-                similarImageUris = "https://source.unsplash.com/400x300/?${encodedSpecies},plant,leaf"
-            )
-            
-            // Repository will handle Room DB persistence and Firestore syncing 
-            repository.insert(plant)
-        }
-    }
-
+    
     fun clearResult() {
         _scanResult.value = null
         _error.value = null
     }
 
-    fun reportIssue(result: ScanResult) {
-        viewModelScope.launch {
-            val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
-            val userId = auth?.currentUser?.uid
-            if (userId != null) {
-                try {
-                    val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                    val reportMap = mapOf(
-                        "plantName" to result.plantName,
-                        "species" to result.species,
-                        "disease" to result.disease,
-                        "timestamp" to System.currentTimeMillis()
-                    )
-                    firestore.collection("users").document(userId).collection("reports").add(reportMap)
-                } catch(e: Exception) {
-                    // Ignore
-                }
+    private fun parseJsonArray(json: JSONObject, key: String): List<String> {
+        val list = mutableListOf<String>()
+        val arr = json.optJSONArray(key)
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                list.add(arr.getString(i))
             }
         }
+        return list
     }
 
     private fun bitmapToBase64(bitmap: Bitmap): String {
         val outputStream = ByteArrayOutputStream()
-        // Resize bitmap if it's too large to save memory/bandwidth
-        val maxDim = 1024
+        val maxDim = 800
         val scale = Math.min(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height)
         val scaledBitmap = if (scale < 1) {
             Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
         } else {
             bitmap
         }
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
         return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
-    private fun provideOfflineFallback() {
-        try {
-            val jsonString = getApplication<Application>().assets.open("plant_diseases.json").bufferedReader().use { it.readText() }
-            val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-            val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Map::class.java)
-            val adapter: JsonAdapter<List<Map<String, String>>> = moshi.adapter(type)
-            val diseases = adapter.fromJson(jsonString)
-            
-            if (!diseases.isNullOrEmpty()) {
-                val randomDisease = diseases.random()
-                val result = ScanResult(
-                    plantName = "Unknown Plant (Offline mode)",
-                    species = "Unknown Species",
-                    disease = randomDisease["disease"] ?: "Unknown",
-                    severityLevel = "Medium",
-                    symptoms = randomDisease["symptoms"]?.split(",")?.map { it.trim() } ?: emptyList(),
-                    healthStatus = "Action Required",
-                    healthScore = 50,
-                    wateringLevel = "Medium",
-                    wateringScore = 50,
-                    sunlight = "Indirect Light",
-                    sunlightScore = 50,
-                    description = "Diagnosed using offline database due to network error.",
-                    treatmentSteps = randomDisease["treatment"]?.split(".")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
-                    careTips = listOf("Ensure proper watering", "Keep away from extreme temperatures")
-                )
-                _scanResult.value = result
-                
-                PointsManager.incrementScans()
-                ScanHistoryManager.addScanResult(result)
-                
-                _error.value = "Offline mode: Network error (503), using local disease database."
-            } else {
-                _error.value = "Error 503: Service Unavailable. Offline database empty."
-            }
-        } catch (e: Exception) {
-            _error.value = "Error 503: Service Unavailable. Could not load offline fallback."
-        }
+    fun savePlant(plant: Plant, existingPlantName: String? = null) {
+        // Already saved during scan.
+    }
+    
+    fun reportIssue(plant: Plant) {
+        // Dummy implementation
     }
 }

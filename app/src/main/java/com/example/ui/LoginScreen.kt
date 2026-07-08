@@ -334,24 +334,6 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                     }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
-
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                TextButton(
-                    onClick = {
-                        val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
-                        auth?.signInAnonymously()?.addOnCompleteListener {
-                            com.example.ui.PointsManager.syncFromFirestore()
-                            com.example.ui.ScanHistoryManager.syncWithFirestore()
-                            onLoginSuccess()
-                        } ?: onLoginSuccess()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Skip for Now (Continue as Guest)", color = leafGreenDark, fontSize = 14.sp)
-                }
-
                 Spacer(modifier = Modifier.weight(1f))
                 Spacer(modifier = Modifier.height(24.dp))
 

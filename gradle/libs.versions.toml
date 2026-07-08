@@ -1,4 +1,5 @@
 [versions]
+googleServices = "4.4.2"
 agp = "9.1.1"
 coreKtx = "1.18.0"
 junit = "4.13.2"
@@ -42,7 +43,7 @@ firebaseAuth = "23.0.0"
 firebaseFirestore = "25.0.0"
 secretsGradlePlugin = "2.0.1"
 workRuntime = "2.9.0"
-revenuecat = "8.8.0"
+revenuecat = "9.23.1"
 credentials = "1.3.0"
 googleid = "1.1.1"
 
@@ -105,6 +106,7 @@ androidx-credentials-play-services-auth = { group = "androidx.credentials", name
 googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
 
 [plugins]
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "googleDevtoolsKsp" }

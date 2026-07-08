@@ -88,9 +88,21 @@ object AdManager {
                 onRewardEarned()
             }
         } else {
-            // Ad not ready
+            // Ad not ready - simulate ad popup
             loadRewarded(activity)
-            onAdDismissed()
+            android.app.AlertDialog.Builder(activity)
+                .setTitle("Simulated Ad")
+                .setMessage("Watching a simulated ad to earn 5 points...\n(Test Ad Failed to Load)")
+                .setPositiveButton("Claim Reward") { _, _ ->
+                    PointsManager.addPoints(5)
+                    onRewardEarned()
+                    onAdDismissed()
+                }
+                .setNegativeButton("Cancel") { _, _ ->
+                    onAdDismissed()
+                }
+                .setCancelable(false)
+                .show()
         }
     }
 }

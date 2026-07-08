@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannerScreen(
+    existingPlantName: String? = null,
     onBack: () -> Unit,
     viewModel: ScannerViewModel = viewModel()
 ) {
@@ -286,7 +287,7 @@ fun ScannerScreen(
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(res.plantName, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                Text(res.name, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                                 Text(res.species, color = Color.Gray, fontSize = 14.sp)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 // Health Status line
@@ -339,10 +340,11 @@ fun ScannerScreen(
                                         if (res.severityLevel != null) {
                                             Text("Severity: ${res.severityLevel}", color = Color(0xFFC62828))
                                         }
-                                        if (res.symptoms.isNotEmpty()) {
+                                        val symptomsList = res.symptoms.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                        if (symptomsList.isNotEmpty()) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Text("Symptoms:", fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
-                                            res.symptoms.forEach {
+                                            symptomsList.forEach {
                                                 Text("• $it", color = Color(0xFFC62828), fontSize = 14.sp)
                                             }
                                         }
@@ -351,7 +353,8 @@ fun ScannerScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
                             }
                             
-                            if (res.careTips.isNotEmpty() && res.careTips.first().isNotBlank()) {
+                            val careTipsList = res.careTips.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (careTipsList.isNotEmpty()) {
                                 Text("Actionable Care Tips", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Card(
@@ -360,7 +363,7 @@ fun ScannerScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(16.dp)) {
-                                        res.careTips.forEach { tip ->
+                                        careTipsList.forEach { tip ->
                                             Text("• $tip", color = Color(0xFF2E7D32), fontSize = 14.sp)
                                         }
                                     }
@@ -368,10 +371,11 @@ fun ScannerScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
                             }
                             
-                            if (res.treatmentSteps.isNotEmpty() && res.treatmentSteps.first().isNotBlank()) {
+                            val treatmentList = res.treatmentSteps.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            if (treatmentList.isNotEmpty()) {
                                 Text("Recommended Treatment", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(8.dp))
-                                res.treatmentSteps.forEachIndexed { index, step ->
+                                treatmentList.forEachIndexed { index, step ->
                                     Row(modifier = Modifier.padding(bottom = 8.dp)) {
                                         Box(
                                             modifier = Modifier
@@ -396,7 +400,7 @@ fun ScannerScreen(
                         
                         Button(
                             onClick = { 
-                                viewModel.savePlant(res)
+                                viewModel.savePlant(res, existingPlantName)
                                 AdManager.showInterstitial(context as android.app.Activity) {
                                     onBack() 
                                 }
@@ -416,6 +420,14 @@ fun ScannerScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Report Incorrect Result", color = Color.Gray)
+                        }
+                        TextButton(
+                            onClick = { 
+                                viewModel.clearResult()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Retry Scan", color = HeroCardBg)
                         }
                     }
                 }

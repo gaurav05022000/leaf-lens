@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
 import android.graphics.Bitmap
 import android.util.Base64
 import java.io.ByteArrayOutputStream
@@ -38,36 +37,45 @@ class AiChatViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 
                 if (BuildConfig.GEMINI_API_KEY.isBlank()) {
-                    _messages.update { it + ChatMessage("Error: Gemini API Key is missing. Please add it in Settings.", false) }
+                    _messages.update { it + ChatMessage("Error: API Key is missing. Please add it in Settings.", false) }
                     _isLoading.value = false
                     return@launch
                 }
 
                 val prompt = "You are an expert AI Botanist. Help the user with plant diagnostics, care tips, or recommendations.\n\nConversation so far:\n$historyText\nBotanist: "
                 
-                val parts = mutableListOf<Part>()
-                parts.add(Part(text = prompt))
+                val contentParts = mutableListOf<OpenRouterContentPart>()
+                contentParts.add(OpenRouterContentPart(type = "text", text = prompt))
+                
                 if (bitmap != null) {
-                    parts.add(Part(inlineData = InlineData("image/jpeg", bitmapToBase64(bitmap))))
+                    val base64 = bitmapToBase64(bitmap)
+                    contentParts.add(OpenRouterContentPart(
+                        type = "image_url",
+                        image_url = OpenRouterImageUrl(url = "data:image/jpeg;base64,$base64")
+                    ))
                 }
                 
-                val request = GenerateContentRequest(
-                    contents = listOf(
-                        Content(
-                            role = "user",
-                            parts = parts
-                        )
-                    )
+                val message = OpenRouterMessage(role = "user", content = contentParts)
+                
+                val request = OpenRouterRequest(
+                    model = "google/gemini-flash-1.5",
+                    messages = listOf(message)
                 )
 
-                val modelsToTry = listOf("gemini-3.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash")
+                val modelsToTry = listOf("google/gemini-flash-1.5", "google/gemini-pro-1.5")
                 var replyText: String? = null
                 var lastError: Exception? = null
-
+                
                 for (model in modelsToTry) {
                     try {
-                        val response = RetrofitClient.service.generateContent(model, BuildConfig.GEMINI_API_KEY, request)
-                        replyText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                        val requestWithModel = request.copy(model = model)
+                        val response = RetrofitClient.service.generateContent(
+                            authorization = "Bearer ${BuildConfig.GEMINI_API_KEY}",
+                            referer = "https://ai.studio",
+                            title = "LeafLens",
+                            request = requestWithModel
+                        )
+                        replyText = response.choices?.firstOrNull()?.message?.content
                         if (replyText != null) break
                     } catch (e: Exception) {
                         lastError = e
@@ -88,15 +96,16 @@ class AiChatViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 _messages.update { it + ChatMessage(finalReply.trim(), false) }
+
             } catch (e: retrofit2.HttpException) {
                 if (e.code() == 400 || e.code() == 401 || e.code() == 403) {
                      _messages.update { it + ChatMessage("Error: Invalid or missing API Key.", false) }
                 } else if (e.code() == 429) {
                      _messages.update { it + ChatMessage("Rate Limit Reached (Error 429). The free tier API key has reached its quota. Please try again later or add a new key in Secrets.", false) }
                 } else if (e.code() == 503) {
-                     _messages.update { it + ChatMessage("Offline Fallback: The AI servers are currently overloaded (503). Here is a general botany tip: Keep a consistent watering schedule and ensure adequate drainage to prevent root rot. Please try connecting again later.", false) }
+                     _messages.update { it + ChatMessage("Error 503: The AI servers are currently overloaded. Please try connecting again later.", false) }
                 } else {
-                     _messages.update { it + ChatMessage("Error ${e.code()}: ${e.message}", false) }
+                     _messages.update { it + ChatMessage("Error ${e.code()}: ${e.message()}", false) }
                 }
             } catch (e: Exception) {
                 _messages.update { it + ChatMessage("Error: ${e.localizedMessage}", false) }
@@ -119,4 +128,3 @@ class AiChatViewModel(application: Application) : AndroidViewModel(application) 
         return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 }
-

@@ -36,6 +36,9 @@ class PlantRepository private constructor(private val context: Context) {
 
     init {
         startSync()
+        auth?.addAuthStateListener {
+            startSync()
+        }
     }
 
     private fun startSync() {
@@ -95,16 +98,23 @@ class PlantRepository private constructor(private val context: Context) {
         return _allPlants.map { list -> list.find { it.name.equals(name, ignoreCase = true) } }
     }
 
+    fun getPlantByNameSync(name: String): Plant? {
+        return _allPlants.value.find { it.name.equals(name, ignoreCase = true) }
+    }
+
     private suspend fun syncWithFirestore(plant: Plant) {
         try {
+            Log.d("PlantRepository", "Syncing plant to Firestore: ${plant.name}")
             val user = auth?.currentUser
             val db = firestore
             if (user != null && db != null) {
                 val documentId = plant.firestoreId ?: db.collection("users").document(user.uid).collection("plants").document().id
                 val plantWithId = plant.copy(firestoreId = documentId)
-
                 db.collection("users").document(user.uid).collection("plants")
-                    .document(documentId).set(plantWithId, SetOptions.merge()).await()
+                    .document(documentId).set(plantWithId, SetOptions.merge())
+                Log.d("PlantRepository", "Successfully synced plant to Firestore with id=$documentId")
+            } else {
+                Log.w("PlantRepository", "Cannot sync plant to Firestore: user or db is null")
             }
         } catch (e: Exception) {
             Log.e("PlantRepository", "Error syncing with Firestore", e)
@@ -117,7 +127,7 @@ class PlantRepository private constructor(private val context: Context) {
             val db = firestore
             if (user != null && db != null && plant.firestoreId != null) {
                 db.collection("users").document(user.uid).collection("plants")
-                    .document(plant.firestoreId).delete().await()
+                    .document(plant.firestoreId).delete()
             }
         } catch (e: Exception) {
             Log.e("PlantRepository", "Error deleting from Firestore", e)

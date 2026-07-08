@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,11 +27,19 @@ import com.example.ui.theme.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiChatScreen(
+    initialPrompt: String? = null,
+    onBack: () -> Unit = {},
     viewModel: AiChatViewModel = viewModel()
 ) {
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     
+    LaunchedEffect(initialPrompt) {
+        if (!initialPrompt.isNullOrBlank()) {
+            viewModel.sendMessage(initialPrompt)
+        }
+    }
+
     val availablePoints by PointsManager.availablePoints.collectAsState()
     
     var inputText by remember { mutableStateOf("") }
@@ -63,6 +72,11 @@ fun AiChatScreen(
                     Column {
                         Text("AI Botanist", fontWeight = FontWeight.Bold)
                         Text("$availablePoints Points Available", fontSize = 12.sp, color = GreenPrimary)
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

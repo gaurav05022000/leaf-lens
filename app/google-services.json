@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "409828078019",
+    "firebase_url": "https://leaflens-plantscanner-default-rtdb.firebaseio.com",
+    "project_id": "leaflens-plantscanner",
+    "storage_bucket": "leaflens-plantscanner.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:409828078019:android:c27600624f7d8d9f6acd76",
+        "android_client_info": {
+          "package_name": "com.gaurav19790.leaflens"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "409828078019-toj4qhadhkfnhmm0jbh1it35ggma4jep.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.gaurav19790.leaflens",
+            "certificate_hash": "41c0614bce2bf9b102c3de594c68f6f4f54f6231"
+          }
+        },
+        {
+          "client_id": "409828078019-rcehgrffrlhuensogfn2lcvglrsv8buv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCNxTAQcq_2-duy2FDqODDImEIesgaVzPY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "409828078019-rcehgrffrlhuensogfn2lcvglrsv8buv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
