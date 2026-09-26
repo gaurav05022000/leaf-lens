@@ -15,7 +15,6 @@ import kotlinx.coroutines.tasks.await
 
 object ScanHistoryManager {
     private lateinit var prefs: SharedPreferences
-
     private val _history = MutableStateFlow<List<ScanHistoryItem>>(emptyList())
     val history = _history.asStateFlow()
 
@@ -23,7 +22,8 @@ object ScanHistoryManager {
     private val firestore get() = try { FirebaseFirestore.getInstance() } catch (e: Exception) { null }
 
     private var deviceId: String = ""
-    private fun getUserId(): String = auth?.currentUser?.uid ?: deviceId
+
+    private fun getUserId(): String? = auth?.currentUser?.uid
 
     fun initialize(context: Context) {
         prefs = context.getSharedPreferences("flora_scan_history_prefs", Context.MODE_PRIVATE)
@@ -52,7 +52,8 @@ object ScanHistoryManager {
             val disease = prefs.getString("sh_${i}_disease", null)
             val severity = prefs.getString("sh_${i}_severity", null)
             val ts = prefs.getLong("sh_${i}_ts", 0L)
-            list.add(ScanHistoryItem(id, name, species, health, disease, severity, ts))
+            val imageUrl = prefs.getString("sh_${i}_image", null)
+            list.add(ScanHistoryItem(id, name, species, health, disease, severity, ts, imageUrl))
         }
         _history.value = list
     }
@@ -68,6 +69,7 @@ object ScanHistoryManager {
             editor.putString("sh_${i}_disease", item.disease)
             editor.putString("sh_${i}_severity", item.severityLevel)
             editor.putLong("sh_${i}_ts", item.timestamp)
+            editor.putString("sh_${i}_image", item.imageUrl)
         }
         editor.apply()
     }
@@ -80,7 +82,8 @@ object ScanHistoryManager {
             healthStatus = result.healthStatus,
             disease = result.disease,
             severityLevel = result.severityLevel,
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            imageUrl = result.imageUri
         )
         val list = _history.value.toMutableList()
         list.add(0, item)
@@ -91,30 +94,29 @@ object ScanHistoryManager {
             try {
                 Log.d("ScanHistoryManager", "Saving scan history to Firestore...")
                 val db = firestore ?: return@launch
-                val map = mapOf<String, Any>(
+                
+                val uid = getUserId() ?: return@launch
+                val map = mutableMapOf<String, Any>(
                     "id" to item.id,
                     "plantName" to item.plantName,
                     "species" to item.species,
                     "healthStatus" to item.healthStatus,
-                    "disease" to (item.disease ?: "None"),
-                    "severityLevel" to (item.severityLevel ?: "None"),
                     "timestamp" to item.timestamp
                 )
+                item.disease?.let { map["disease"] = it }
+                item.severityLevel?.let { map["severityLevel"] = it }
+                item.imageUrl?.let { map["imageUrl"] = it }
                 
-                val uid = getUserId()
+                db.collection("users").document(uid).collection("scan_history")
+                    .document(item.id).set(map).await()
                 
-                // Store user plant history
-                db.collection("users").document(uid).collection("scan_history").document(item.id).set(map).await()
-                
-                // Store global scan history
-                db.collection("scan_history").document(item.id).set(map).await()
 
                 // Store identified disease logs
                 if (!item.disease.isNullOrBlank() && item.disease != "None") {
                     val diseaseLog = map + mapOf("logType" to "Disease Identificaton", "userId" to uid)
                     db.collection("users").document(uid).collection("disease_logs").document(item.id).set(diseaseLog).await()
-                    db.collection("disease_logs").document(item.id).set(diseaseLog).await()
                 }
+
                 Log.d("ScanHistoryManager", "Successfully saved scan history id=${item.id}")
             } catch (e: Exception) {
                 Log.e("ScanHistoryManager", "Error saving scan history to firestore", e)
@@ -132,24 +134,30 @@ object ScanHistoryManager {
     }
 
     fun syncWithFirestore() {
-        val uid = getUserId()
+        val uid = getUserId() ?: return
         val db = firestore ?: return
+
         snapshotListener?.remove()
         snapshotListener = db.collection("users").document(uid).collection("scan_history")
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
                 
                 val cloudItems = snapshot.documents.mapNotNull { doc ->
-                    val id = doc.getString("id") ?: doc.id
-                    val name = doc.getString("plantName") ?: return@mapNotNull null
-                    val species = doc.getString("species") ?: ""
-                    val health = doc.getString("healthStatus") ?: "Unknown"
-                    val disease = doc.getString("disease")
-                    val severity = doc.getString("severityLevel")
-                    val ts = doc.getLong("timestamp") ?: 0L
-                    ScanHistoryItem(id, name, species, health, disease, severity, ts)
+                    try {
+                        val id = doc.getString("id") ?: doc.id
+                        val name = doc.getString("plantName") ?: return@mapNotNull null
+                        val species = doc.getString("species") ?: ""
+                        val health = doc.getString("healthStatus") ?: "Unknown"
+                        val disease = doc.getString("disease")
+                        val severity = doc.getString("severityLevel")
+                        val ts = doc.getLong("timestamp") ?: 0L
+                        val imageUrl = doc.getString("imageUrl")
+                        ScanHistoryItem(id, name, species, health, disease, severity, ts, imageUrl)
+                    } catch (e: Exception) {
+                        null
+                    }
                 }.sortedByDescending { it.timestamp }
-
+                
                 val localItems = _history.value
                 val merged = (cloudItems + localItems).distinctBy { it.id }.sortedByDescending { it.timestamp }
                 
@@ -160,22 +168,27 @@ object ScanHistoryManager {
                 val missingInCloud = localItems.filter { !cloudIds.contains(it.id) }
                 
                 missingInCloud.forEach { item ->
-                    val map = mapOf<String, Any>(
-                        "id" to item.id,
-                        "plantName" to item.plantName,
-                        "species" to item.species,
-                        "healthStatus" to item.healthStatus,
-                        "disease" to (item.disease ?: "None"),
-                        "severityLevel" to (item.severityLevel ?: "None"),
-                        "timestamp" to item.timestamp
-                    )
-                    db.collection("users").document(uid).collection("scan_history").document(item.id).set(map)
-                    db.collection("scan_history").document(item.id).set(map)
-                    
-                    if (!item.disease.isNullOrBlank() && item.disease != "None") {
-                        val diseaseLog = map + mapOf("logType" to "Disease Identificaton", "userId" to uid)
-                        db.collection("users").document(uid).collection("disease_logs").document(item.id).set(diseaseLog)
-                        db.collection("disease_logs").document(item.id).set(diseaseLog)
+                    try {
+                        
+                val map = mutableMapOf<String, Any>(
+                            "id" to item.id,
+                            "plantName" to item.plantName,
+                            "species" to item.species,
+                            "healthStatus" to item.healthStatus,
+                            "timestamp" to item.timestamp
+                        )
+                        item.disease?.let { map["disease"] = it }
+                        item.severityLevel?.let { map["severityLevel"] = it }
+                        item.imageUrl?.let { map["imageUrl"] = it }
+                        
+                        db.collection("users").document(uid).collection("scan_history").document(item.id).set(map)
+                        
+                        if (!item.disease.isNullOrBlank() && item.disease != "None") {
+                            val diseaseLog = map + mapOf("logType" to "Disease Identificaton", "userId" to uid)
+                            db.collection("users").document(uid).collection("disease_logs").document(item.id).set(diseaseLog)
+                        }
+                    } catch(e: Exception) {
+                        Log.e("ScanHistoryManager", "Error saving scan history to firestore", e)
                     }
                 }
             }

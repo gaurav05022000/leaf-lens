@@ -1,4 +1,5 @@
 package com.example.ui
+import com.example.data.isStatusHealthy
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.Plant
 import com.example.ui.theme.*
@@ -45,6 +49,7 @@ fun CollectionScreen(
     val displayPlants = if (auth != null && firestorePlants.isNotEmpty()) firestorePlants else localPlants
 
     var searchQuery by remember { mutableStateOf("") }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var selectedTabIndex by remember { mutableStateOf(0) }
 
     var showAddPlantDialog by remember { mutableStateOf(false) }
@@ -82,7 +87,9 @@ fun CollectionScreen(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = HeroCardBg,
-                            unfocusedBorderColor = SurfaceVariant
+                            unfocusedBorderColor = SurfaceVariant,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
                         )
                     )
 
@@ -94,7 +101,9 @@ fun CollectionScreen(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = HeroCardBg,
-                            unfocusedBorderColor = SurfaceVariant
+                            unfocusedBorderColor = SurfaceVariant,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
                         )
                     )
 
@@ -261,7 +270,7 @@ fun CollectionScreen(
         },
         containerColor = BackgroundLight
     ) { innerPadding ->
-        Surface(modifier = Modifier.fillMaxSize().padding(innerPadding), color = BackgroundLight) {
+        Surface(modifier = Modifier.fillMaxSize().padding(innerPadding).imePadding(), color = BackgroundLight) {
             Column(modifier = Modifier.fillMaxSize()) {
                 TopAppBar(
                     title = { Text("My Plants", fontWeight = FontWeight.Bold) },
@@ -304,15 +313,31 @@ fun CollectionScreen(
             if (selectedTabIndex == 0) {
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = { newValue ->
+                        if (newValue.contains('\n')) {
+                            searchQuery = newValue.replace("\n", "")
+                            focusManager.clearFocus()
+                        } else {
+                            searchQuery = newValue
+                        }
+                    },
                     placeholder = { Text("Search plants by name, species or status...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(16.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus()
+                        }
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
                         unfocusedBorderColor = SurfaceVariant,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
                         focusedBorderColor = HeroCardBg
                     )
                 )
@@ -420,8 +445,8 @@ fun TasksSection(plants: List<Plant>) {
 
 @Composable
 fun PlantListRow(plant: Plant, onPlantClick: (Plant) -> Unit = {}, onDeleteClick: (Plant) -> Unit, onEditClick: (Plant) -> Unit) {
-    val healthColor = if (plant.healthStatus.equals("Healthy", ignoreCase = true)) com.example.ui.theme.HeroCardBg else com.example.ui.theme.AlertTextPrimary
-    val bgColor = if (plant.healthStatus.equals("Healthy", ignoreCase = true)) com.example.ui.theme.SurfaceVariant else com.example.ui.theme.AlertCardBg
+    val healthColor = if (plant.healthStatus.isStatusHealthy()) com.example.ui.theme.HeroCardBg else com.example.ui.theme.AlertTextPrimary
+    val bgColor = if (plant.healthStatus.isStatusHealthy()) com.example.ui.theme.SurfaceVariant else com.example.ui.theme.AlertCardBg
     
     val timeNow = System.currentTimeMillis()
     val needsWater = plant.nextWateringTimeMs < timeNow
@@ -468,8 +493,8 @@ fun PlantListRow(plant: Plant, onPlantClick: (Plant) -> Unit = {}, onDeleteClick
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (plant.imageUri != null) {
-                    coil.compose.AsyncImage(
+                if (!plant.imageUri.isNullOrEmpty()) {
+                    PlantImage(
                         model = plant.imageUri,
                         contentDescription = "Plant image",
                         modifier = Modifier

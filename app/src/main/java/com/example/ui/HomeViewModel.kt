@@ -1,4 +1,5 @@
 package com.example.ui
+import com.example.data.isStatusHealthy
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -51,9 +52,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 name = name,
                 species = species,
                 healthStatus = healthStatus,
-                healthScore = if (healthStatus.lowercase() == "healthy") 95 else 60,
+                healthScore = if (healthStatus.isStatusHealthy()) 95 else 60,
                 wateringLevel = if (wateringInterval <= 4) "High" else if (wateringInterval >= 14) "Low" else "Medium",
                 wateringScore = (100 - lastWateredDaysAgo * 12).coerceIn(0, 100),
+                wateringIntervalDays = wateringInterval.toInt(),
+                fertilizingIntervalDays = feedingInterval.toInt(),
                 sunlight = sunlight,
                 sunlightScore = if (sunlight == "Bright Direct") 90 else 75,
                 nextWateringTimeMs = nextWateringTimeMs,
@@ -87,9 +90,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 name = name,
                 species = species,
                 healthStatus = healthStatus,
-                healthScore = if (healthStatus.lowercase() == "healthy") 95 else 60,
+                healthScore = if (healthStatus.isStatusHealthy()) 95 else 60,
                 wateringLevel = if (wateringInterval <= 4) "High" else if (wateringInterval >= 14) "Low" else "Medium",
                 wateringScore = (100 - lastWateredDaysAgo * 12).coerceIn(0, 100),
+                wateringIntervalDays = wateringInterval.toInt(),
+                fertilizingIntervalDays = feedingInterval.toInt(),
                 sunlight = sunlight,
                 sunlightScore = if (sunlight == "Bright Direct") 90 else 75,
                 nextWateringTimeMs = nextWateringTimeMs,
@@ -101,10 +106,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun waterPlant(plant: Plant, actionTimeMs: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
-            val interval = when (plant.wateringLevel) {
-                "High" -> 4L
-                "Low" -> 14L
-                else -> 7L
+            val interval = if (plant.wateringIntervalDays > 0) plant.wateringIntervalDays.toLong() else {
+                when (plant.wateringLevel) {
+                    "High" -> 4L
+                    "Low" -> 14L
+                    else -> 7L
+                }
             }
             val updated = plant.copy(
                 nextWateringTimeMs = actionTimeMs + interval * 86400000L,
@@ -116,8 +123,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun fertilizePlant(plant: Plant, actionTimeMs: Long = System.currentTimeMillis()) {
         viewModelScope.launch {
+            val interval = if (plant.fertilizingIntervalDays > 0) plant.fertilizingIntervalDays.toLong() else 30L
             val updated = plant.copy(
-                nextFeedingTimeMs = actionTimeMs + 30L * 86400000L
+                nextFeedingTimeMs = actionTimeMs + interval * 86400000L
             )
             repository.update(updated)
         }
@@ -134,14 +142,50 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getPlantByNameFlow(name: String) = repository.getPlantByName(name)
+    fun getPlantByIdFlow(id: Int) = repository.getPlantById(id)
 
     var weatherData = androidx.compose.runtime.mutableStateOf<com.example.api.WeatherResponse?>(null)
+        private set
+
+    var locationName = androidx.compose.runtime.mutableStateOf<String>("Loading Location...")
         private set
 
     fun fetchWeather(lat: Double, lon: Double) {
         viewModelScope.launch {
             try {
                 weatherData.value = com.example.api.WeatherApi.retrofitService.getCurrentWeather(lat, lon)
+                
+                launch(kotlinx.coroutines.Dispatchers.IO) {
+                    try {
+                        val geocoder = android.location.Geocoder(getApplication(), java.util.Locale.getDefault())
+                        try {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                geocoder.getFromLocation(lat, lon, 1, object : android.location.Geocoder.GeocodeListener {
+                                    override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                                        if (addresses.isNotEmpty()) {
+                                            val city = addresses[0].locality ?: addresses[0].subAdminArea ?: "Unknown Location"
+                                            locationName.value = city
+                                        }
+                                    }
+                                    override fun onError(errorMessage: String?) {
+                                        super.onError(errorMessage)
+                                    }
+                                })
+                            } else {
+                                @Suppress("DEPRECATION")
+                                val addresses = geocoder.getFromLocation(lat, lon, 1)
+                                if (!addresses.isNullOrEmpty()) {
+                                    val city = addresses[0].locality ?: addresses[0].subAdminArea ?: "Unknown Location"
+                                    locationName.value = city
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }

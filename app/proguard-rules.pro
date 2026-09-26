@@ -1,21 +1,56 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+-keep class com.example.api.** { *; }
+-keepclassmembers class com.example.api.** {
+    <fields>;
+    <init>(...);
+}
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+-keep class com.squareup.moshi.** { *; }
+-keep interface com.squareup.moshi.** { *; }
+-keepclassmembers class * {
+    @com.squareup.moshi.Json <fields>;
+}
+-keep @com.squareup.moshi.JsonQualifier interface *
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Retrofit
+-keep class retrofit2.** { *; }
+-keepattributes Signature, Exceptions, *Annotation*
+-keepclasseswithmembers class * {
+    @retrofit2.http.* <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Room
+-keep class com.example.data.room.** { *; }
+-keepclassmembers class com.example.data.room.** {
+    <fields>;
+    <init>(...);
+}
+
+# Firestore Data Classes
+-keep class com.example.ui.PointsManager$PointTransaction { *; }
+-keepclassmembers class com.example.ui.PointsManager$PointTransaction { *; }
+
+-keep class com.example.ui.ScanHistoryItem { *; }
+-keepclassmembers class com.example.ui.ScanHistoryItem { *; }
+
+-keep class com.example.ui.ChatMessage { *; }
+-keepclassmembers class com.example.ui.ChatMessage { *; }
+
+-keep class com.example.data.Plant { *; }
+-keepclassmembers class com.example.data.Plant { *; }
+
+# Coroutines
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-keepclassmembernames class kotlinx.** {
+    volatile <fields>;
+}
+
+# Androidx
+-keep class androidx.lifecycle.** { *; }
+-keep class com.google.android.gms.internal.location.** { *; }
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.android.gms.**
+-keep class kotlin.Metadata { *; }
+-keep class kotlin.reflect.** { *; }
+-keep class kotlin.jvm.internal.** { *; }
+-keep class com.example.worker.** { *; }

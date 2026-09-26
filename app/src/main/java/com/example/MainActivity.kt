@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
                 com.google.firebase.FirebaseApp.initializeApp(this, options)
             }
         } catch (e: Exception) {
-            // Ignore init errors
+            android.util.Log.e("MainActivity", "Firebase manual init failed", e)
         }
 
         try {
@@ -94,8 +94,10 @@ class MainActivity : ComponentActivity() {
 
         try {
             com.google.android.gms.ads.MobileAds.initialize(this) {
-                com.example.ui.AdManager.loadInterstitial(this)
-                com.example.ui.AdManager.loadRewarded(this)
+                runOnUiThread {
+                    com.example.ui.AdManager.loadInterstitial(this)
+                    com.example.ui.AdManager.loadRewarded(this)
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -264,9 +266,8 @@ fun MainScreen(rootNavController: NavController) {
             composable("home") {
                 HomeScreen(
                     onNavigateToScan = { navController.navigate("scan") },
-                    onNavigateToPlant = { plantName -> 
-                        val encoded = android.net.Uri.encode(plantName)
-                        navController.navigate("plantProfile/$encoded") 
+                    onNavigateToPlant = { plantId -> 
+                        navController.navigate("plantProfile/$plantId") 
                     },
                     onNavigateToProfile = { navController.navigate("profile") }
                 )
@@ -286,8 +287,7 @@ fun MainScreen(rootNavController: NavController) {
             composable("dictionary") {
                 CollectionScreen(
                     onPlantClick = { plant ->
-                        val encoded = android.net.Uri.encode(plant.name)
-                        navController.navigate("plantProfile/$encoded")
+                        navController.navigate("plantProfile/${plant.id}")
                     }
                 )
             }
@@ -304,12 +304,17 @@ fun MainScreen(rootNavController: NavController) {
                     onBack = { navController.popBackStack() }
                 )
             }
-            composable("plantProfile/{plantName}") { backStackEntry ->
-                val plantName = backStackEntry.arguments?.getString("plantName") ?: ""
+            composable(
+                route = "plantProfile/{plantId}",
+                arguments = listOf(androidx.navigation.navArgument("plantId") {
+                    type = androidx.navigation.NavType.IntType
+                })
+            ) { backStackEntry ->
+                val plantId = backStackEntry.arguments?.getInt("plantId") ?: 0
                 com.example.ui.PlantProfileScreen(
-                    plantName = plantName,
+                    plantId = plantId,
                     onBack = { navController.popBackStack() },
-                    onRescanClick = {
+                    onRescanClick = { plantName ->
                         val encoded = android.net.Uri.encode(plantName)
                         navController.navigate("rescan/$encoded")
                     },
@@ -359,7 +364,15 @@ fun MainScreen(rootNavController: NavController) {
                             object : com.revenuecat.purchases.ui.revenuecatui.PaywallListener {
                                 override fun onPurchaseCompleted(customerInfo: com.revenuecat.purchases.CustomerInfo, storeTransaction: com.revenuecat.purchases.models.StoreTransaction) {
                                     android.util.Log.d("RevenueCat", "Purchase completed")
-                                    com.example.ui.PointsManager.addPoints(100)
+                                    val purchasedProductId = storeTransaction.productIds.firstOrNull() ?: ""
+                                    val pointsToAdd = when {
+                                        purchasedProductId.contains("1000") -> 1000
+                                        purchasedProductId.contains("500") -> 500
+                                        purchasedProductId.contains("250") -> 250
+                                        purchasedProductId.contains("100") -> 100
+                                        else -> 0
+                                    }
+                                    com.example.ui.PointsManager.addPoints(pointsToAdd)
                                     navController.popBackStack()
                                 }
                             }

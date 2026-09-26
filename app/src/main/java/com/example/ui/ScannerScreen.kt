@@ -115,18 +115,14 @@ fun ScannerScreen(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            val source = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                android.graphics.ImageDecoder.createSource(context.contentResolver, it)
-            } else {
-                null
-            }
-            source?.let { src ->
-                val bitmap = android.graphics.ImageDecoder.decodeBitmap(src)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                val source = android.graphics.ImageDecoder.createSource(context.contentResolver, it)
+                val bitmap = android.graphics.ImageDecoder.decodeBitmap(source)
                 // convert hardware bitmap to software for processing if needed, but Gemini API needs base64
                 val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
                 pendingBitmap = softwareBitmap
                 showConfirmationDialog = true
-            } ?: run {
+            } else {
                 @Suppress("DEPRECATION")
                 val bmp = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, it)
                 pendingBitmap = bmp
@@ -401,8 +397,16 @@ fun ScannerScreen(
                         Button(
                             onClick = { 
                                 viewModel.savePlant(res, existingPlantName)
-                                AdManager.showInterstitial(context as android.app.Activity) {
-                                    onBack() 
+                                val prefs = context.getSharedPreferences("ad_prefs", android.content.Context.MODE_PRIVATE)
+                                val currentCount = prefs.getInt("save_count", 0) + 1
+                                prefs.edit().putInt("save_count", currentCount).apply()
+                                
+                                if (currentCount % 3 == 0) {
+                                    AdManager.showInterstitial(context as android.app.Activity) {
+                                        onBack() 
+                                    }
+                                } else {
+                                    onBack()
                                 }
                             },
                             modifier = Modifier

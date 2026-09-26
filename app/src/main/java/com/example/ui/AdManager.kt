@@ -17,20 +17,24 @@ object AdManager {
     private var rewardedAd: RewardedAd? = null
     
     // Sample AdMob unit IDs for testing
-    private const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-3940256099942544/1033173712"
-    private const val REWARDED_AD_UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+    private const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-1350477690991328/1140772950"
+    private const val REWARDED_AD_UNIT_ID = "ca-app-pub-1350477690991328/7447959765"
 
     fun loadInterstitial(activity: Activity) {
-        val adRequest = AdRequest.Builder().build()
-        InterstitialAd.load(activity, INTERSTITIAL_AD_UNIT_ID, adRequest,
-            object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd) {
-                    interstitialAd = ad
-                }
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    interstitialAd = null
-                }
-            })
+        try {
+            val adRequest = AdRequest.Builder().build()
+            InterstitialAd.load(activity, INTERSTITIAL_AD_UNIT_ID, adRequest,
+                object : InterstitialAdLoadCallback() {
+                    override fun onAdLoaded(ad: InterstitialAd) {
+                        interstitialAd = ad
+                    }
+                    override fun onAdFailedToLoad(adError: LoadAdError) {
+                        interstitialAd = null
+                    }
+                })
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
@@ -56,19 +60,51 @@ object AdManager {
     }
 
     fun loadRewarded(activity: Activity) {
-        val adRequest = AdRequest.Builder().build()
-        RewardedAd.load(activity, REWARDED_AD_UNIT_ID, adRequest,
-            object : RewardedAdLoadCallback() {
-                override fun onAdLoaded(ad: RewardedAd) {
-                    rewardedAd = ad
-                }
-                override fun onAdFailedToLoad(adError: LoadAdError) {
-                    rewardedAd = null
-                }
-            })
+        try {
+            val adRequest = AdRequest.Builder().build()
+            RewardedAd.load(activity, REWARDED_AD_UNIT_ID, adRequest,
+                object : RewardedAdLoadCallback() {
+                    override fun onAdLoaded(ad: RewardedAd) {
+                        rewardedAd = ad
+                    }
+                    override fun onAdFailedToLoad(adError: LoadAdError) {
+                        rewardedAd = null
+                    }
+                })
+        } catch(e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+
+    fun canWatchRewardedAd(activity: Activity): Boolean {
+        val prefs = activity.getSharedPreferences("flora_points_prefs", android.content.Context.MODE_PRIVATE)
+        val lastDate = prefs.getString("last_ad_date", "")
+        val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        if (lastDate != currentDate) {
+            return true
+        }
+        val count = prefs.getInt("ad_watch_count", 0)
+        return count < 2
+    }
+
+    fun recordRewardedAdWatched(activity: Activity) {
+        val prefs = activity.getSharedPreferences("flora_points_prefs", android.content.Context.MODE_PRIVATE)
+        val lastDate = prefs.getString("last_ad_date", "")
+        val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        if (lastDate != currentDate) {
+            prefs.edit()
+                .putString("last_ad_date", currentDate)
+                .putInt("ad_watch_count", 1)
+                .apply()
+        } else {
+            val count = prefs.getInt("ad_watch_count", 0)
+            prefs.edit().putInt("ad_watch_count", count + 1).apply()
+        }
     }
 
     fun showRewarded(activity: Activity, onRewardEarned: () -> Unit, onAdDismissed: () -> Unit = {}) {
+
         if (rewardedAd != null) {
             rewardedAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdDismissedFullScreenContent() {
@@ -84,21 +120,16 @@ object AdManager {
             }
             rewardedAd?.show(activity) { rewardItem ->
                 // Reward the user!
-                PointsManager.addPoints(5)
+                recordRewardedAdWatched(activity)
+                PointsManager.addPoints(5, "Watched Ad")
                 onRewardEarned()
             }
         } else {
             // Ad not ready - simulate ad popup
-            loadRewarded(activity)
             android.app.AlertDialog.Builder(activity)
-                .setTitle("Simulated Ad")
-                .setMessage("Watching a simulated ad to earn 5 points...\n(Test Ad Failed to Load)")
-                .setPositiveButton("Claim Reward") { _, _ ->
-                    PointsManager.addPoints(5)
-                    onRewardEarned()
-                    onAdDismissed()
-                }
-                .setNegativeButton("Cancel") { _, _ ->
+                .setTitle("Ad Not Ready")
+                .setMessage("No video ad is currently available. Please try again in a moment.")
+                .setPositiveButton("OK") { _, _ ->
                     onAdDismissed()
                 }
                 .setCancelable(false)

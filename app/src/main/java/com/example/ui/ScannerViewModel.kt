@@ -2,14 +2,13 @@ package com.example.ui
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
-import com.example.api.OpenRouterRequest
-import com.example.api.OpenRouterMessage
 import com.example.api.OpenRouterContentPart
 import com.example.api.OpenRouterImageUrl
+import com.example.api.OpenRouterMessage
+import com.example.api.OpenRouterRequest
 import com.example.api.RetrofitClient
 import com.example.data.Plant
 import com.example.data.PlantRepository
@@ -18,56 +17,63 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import android.util.Base64
+import kotlinx.coroutines.tasks.await
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: PlantRepository
-    
-    init {
-        repository = PlantRepository.getInstance(application)
-    }
-
-    private val _scanResult = MutableStateFlow<Plant?>(null)
-    val scanResult = _scanResult.asStateFlow()
+    private val repository = PlantRepository.getInstance(application)
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning = _isScanning.asStateFlow()
+
+    private val _scanResult = MutableStateFlow<Plant?>(null)
+    val scanResult = _scanResult.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
     fun scanPlant(bitmap: Bitmap) {
         if (_isScanning.value) return
+        
+        if (PointsManager.availablePoints.value < 10) {
+            _error.value = "Not enough points to scan. You need 10 points."
+            return
+        }
         _isScanning.value = true
         _error.value = null
 
         viewModelScope.launch {
             try {
                 val base64Image = bitmapToBase64(bitmap)
+                
                 val prompt = """
-                    You are an expert botanist and plant pathologist AI. 
-                    Analyze the attached image and identify the plant species. Then, evaluate its health.
-                    Return a JSON object EXACTLY matching this structure:
+                    You are LeafLens AI, an expert and friendly plant assistant. Analyze this plant image and provide a comprehensive diagnostic.
+                    Specifically evaluate its overall health status, provide actionable steps to improve its health (especially if it has issues), and list all important things to keep in mind for its daily care.
+                    Maintain an encouraging and friendly tone.
+                    Respond ONLY in JSON format matching this structure:
                     {
-                      "plantName": "Common Name of the Plant",
-                      "species": "Scientific name",
-                      "disease": "Name of disease if present, or null if healthy",
-                      "severityLevel": "Low, Medium, High, or None",
-                      "symptoms": ["Symptom 1", "Symptom 2"], // empty list if healthy
-                      "healthStatus": "e.g. Healthy, Alert, Action Required",
-                      "healthScore": 92, // integer 0-100 indicating overall health
-                      "wateringLevel": "High, Medium, or Low",
-                      "wateringScore": 80, // integer 0-100
-                      "sunlight": "e.g. Bright Direct, Indirect Light",
-                      "sunlightScore": 95, // integer 0-100
-                      "description": "Short description of the plant and its care needs",
-                      "treatmentSteps": ["Step 1", "Step 2"], // empty list if healthy
-                      "careTips": ["Tip 1", "Tip 2"] // Actionable care tips based on the identified plant disease
+                      "plantName": "String (Common name)",
+                      "species": "String (Scientific name)",
+                      "disease": "String or null (Identify any diseases, pests, or deficiencies)",
+                      "severityLevel": "String or null (e.g., Mild, Moderate, Severe)",
+                      "symptoms": ["String", "String"] (List any observable symptoms),
+                      "healthStatus": "String (e.g., Excellent, Good, Fair, Poor, Critical)",
+                      "healthScore": 100 (Integer, 0-100),
+                      "wateringLevel": "String (e.g., High, Medium, Low)",
+                      "wateringScore": 100 (Integer, 0-100),
+                      "wateringIntervalDays": 7 (Integer, how many days between watering),
+                      "fertilizingIntervalDays": 30 (Integer, how many days between fertilizing),
+                      "sunlight": "String (e.g., Full Sun, Partial Shade, Indirect)",
+                      "sunlightScore": 100 (Integer, 0-100),
+                      "description": "String (Detailed summary of the plant's current condition and what it needs. Use emojis to make it engaging!)",
+                      "treatmentSteps": ["Step 1", "Step 2"] (Actionable steps to treat current issues or improve health),
+                      "careTips": ["Tip 1", "Tip 2"] (Comprehensive ongoing care instructions including light, water, soil, and environment needs)
                     }
                 """.trimIndent()
 
                 val request = OpenRouterRequest(
-                    model = "google/gemini-flash-1.5",
+                    model = "google/gemini-2.5-flash-lite",
                     messages = listOf(
                         OpenRouterMessage(
                             role = "user",
@@ -80,13 +86,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     response_format = com.example.api.OpenRouterResponseFormat("json_object")
                 )
 
-                if (BuildConfig.GEMINI_API_KEY.isBlank()) {
+                if (BuildConfig.OPENROUTER_API_KEY.isBlank()) {
                     _error.value = "API Key is missing. Please add it in Settings -> Secrets."
                     _isScanning.value = false
                     return@launch
                 }
 
-                val modelsToTry = listOf("google/gemini-flash-1.5", "google/gemini-pro-1.5")
+                val modelsToTry = listOf("google/gemini-2.5-flash-lite", "google/gemini-2.5-flash")
                 var responseText: String? = null
                 var lastError: Exception? = null
 
@@ -94,7 +100,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     try {
                         val requestWithModel = request.copy(model = model)
                         val response = RetrofitClient.service.generateContent(
-                            authorization = "Bearer ${BuildConfig.GEMINI_API_KEY}",
+                            authorization = "Bearer ${BuildConfig.OPENROUTER_API_KEY}",
                             referer = "https://ai.studio",
                             title = "LeafLens",
                             request = requestWithModel
@@ -124,6 +130,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 val cleanJson = text.substring(jsonStartIndex, jsonEndIndex + 1)
                 val json = JSONObject(cleanJson)
 
+                var imageUrl = ""
+                try {
+                    imageUrl = uploadImageToStorage(bitmap)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 val plant = Plant(
                     name = json.optString("plantName", "Unknown Plant"),
                     species = json.optString("species", "Unknown Species"),
@@ -134,23 +147,27 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     healthScore = json.optInt("healthScore", 0),
                     wateringLevel = json.optString("wateringLevel", "Unknown"),
                     wateringScore = json.optInt("wateringScore", 0),
+                    wateringIntervalDays = json.optInt("wateringIntervalDays", 7),
+                    fertilizingIntervalDays = json.optInt("fertilizingIntervalDays", 30),
                     sunlight = json.optString("sunlight", "Unknown"),
                     sunlightScore = json.optInt("sunlightScore", 0),
                     description = json.optString("description", ""),
                     treatmentSteps = parseJsonArray(json, "treatmentSteps").joinToString(", "),
                     careTips = parseJsonArray(json, "careTips").joinToString(", "),
-                    imageUri = "" 
+                    imageUri = imageUrl 
                 )
 
                 repository.insert(plant)
+                ScanHistoryManager.addScanResult(plant)
                 _scanResult.value = plant
                 
                 PointsManager.deductPoints(10)
                 PointsManager.incrementScans()
-
             } catch (e: retrofit2.HttpException) {
                 if (e.code() == 400 || e.code() == 401 || e.code() == 403) {
                      _error.value = "API Key error. Ensure your API Key in Secrets is valid."
+                } else if (e.code() == 404) {
+                     _error.value = "Model not found (404). OpenRouter might have changed the model names."
                 } else if (e.code() == 429) {
                      _error.value = "Rate limit reached. Please try again later."
                 } else if (e.code() == 503) {
@@ -195,11 +212,58 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
+    private suspend fun uploadImageToStorage(bitmap: Bitmap): String {
+        return try {
+            val outputStream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
+            val data = outputStream.toByteArray()
+            
+            val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+            val uid = auth.currentUser?.uid ?: "anonymous"
+            val filename = "scans_${System.currentTimeMillis()}.jpg"
+            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("users/$uid/$filename")
+            
+            storageRef.putBytes(data).await()
+            val uri = storageRef.downloadUrl.await()
+            uri.toString()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Fallback to Base64 data URI for Firestore sync
+            try {
+                val outputStream = ByteArrayOutputStream()
+                val scale = Math.min(400f / bitmap.width, 400f / bitmap.height)
+                val scaledBitmap = if (scale < 1) {
+                    Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+                } else {
+                    bitmap
+                }
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+                val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
+                "data:image/jpeg;base64,$base64"
+            } catch (ex: Exception) {
+                ex.printStackTrace()
+                ""
+            }
+        }
+    }
+
     fun savePlant(plant: Plant, existingPlantName: String? = null) {
         // Already saved during scan.
     }
     
     fun reportIssue(plant: Plant) {
-        // Dummy implementation
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return@launch
+                db.collection("reports").add(mapOf(
+                    "userId" to uid,
+                    "plantName" to plant.name,
+                    "timestamp" to System.currentTimeMillis()
+                ))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }

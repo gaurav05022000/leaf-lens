@@ -5,6 +5,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.google.firebase.auth.GoogleAuthProvider
@@ -93,11 +94,7 @@ class LoginViewModel : ViewModel() {
         _uiState.value = LoginUiState.Loading
         viewModelScope.launch {
             try {
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(webClientId)
-                    .setAutoSelectEnabled(true)
-                    .build()
+                val googleIdOption = GetSignInWithGoogleOption.Builder(webClientId).build()
 
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleIdOption)
@@ -140,6 +137,11 @@ class LoginViewModel : ViewModel() {
                     _uiState.value = LoginUiState.Error("Unexpected credential type encountered.")
                 }
             } catch (e: GetCredentialException) {
+                val msg = e.localizedMessage ?: ""
+                if (msg.contains("16")) {
+                    _uiState.value = LoginUiState.Error("Play Store SHA-1 not configured in Firebase. Copy the SHA-1 from Google Play Console (App Integrity) and add it to Firebase Console.")
+                    return@launch
+                }
                 _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Google Sign-In failed or was cancelled.")
             } catch (e: Exception) {
                 _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Firebase Sign-In failed.")
@@ -199,8 +201,8 @@ class LoginViewModel : ViewModel() {
             return
         }
         val currentAuth = try { FirebaseAuth.getInstance() } catch(e: Exception) { null }
-        if (currentAuth == null) {
-            _uiState.value = LoginUiState.Error("Firebase is not configured")
+        if (currentAuth == null || currentAuth.app.options.projectId == "MY_FIREBASE_PROJECT_ID") {
+            _uiState.value = LoginUiState.Error("Firebase is not configured. Please add your credentials in Settings -> Secrets.")
             return
         }
 
@@ -208,7 +210,7 @@ class LoginViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 currentAuth.sendPasswordResetEmail(email).await()
-                _uiState.value = LoginUiState.Error("Password reset email sent. Please check your inbox.")
+                _uiState.value = LoginUiState.Message("Password reset email sent. Please check your inbox.")
             } catch (e: Exception) {
                 _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Failed to send reset email")
             }
@@ -221,4 +223,5 @@ sealed class LoginUiState {
     object Loading : LoginUiState()
     object Success : LoginUiState()
     data class Error(val message: String) : LoginUiState()
+    data class Message(val message: String) : LoginUiState()
 }

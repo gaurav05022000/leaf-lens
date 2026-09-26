@@ -1,5 +1,8 @@
 package com.example.ui
 
+import android.annotation.SuppressLint
+import com.example.data.isStatusHealthy
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,21 +34,31 @@ import com.example.data.Plant
 import com.example.ui.theme.*
 
 @OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class)
+
+@SuppressLint("MissingPermission")
 @Composable
 fun HomeScreen(
     onNavigateToScan: () -> Unit,
-    onNavigateToPlant: (String) -> Unit,
+    onNavigateToPlant: (Int) -> Unit,
     onNavigateToProfile: () -> Unit = {},
     viewModel: HomeViewModel = viewModel()
 ) {
     val plants by viewModel.allPlants.collectAsState()
     val weatherData by viewModel.weatherData
-    val issuesCount = plants.count { it.healthStatus != "Healthy" }
+    val issuesCount = plants.count { !it.healthStatus.isStatusHealthy() }
     
     val context = androidx.compose.ui.platform.LocalContext.current
+    
+    val locationPermissions = com.google.accompanist.permissions.rememberMultiplePermissionsState(
+        permissions = listOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+    )
+
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
         val notificationPermission = com.google.accompanist.permissions.rememberPermissionState(
-            android.Manifest.permission.POST_NOTIFICATIONS
+            "android.permission.POST_NOTIFICATIONS"
         )
         androidx.compose.runtime.LaunchedEffect(Unit) {
             if (!notificationPermission.status.isGranted) {
@@ -54,8 +67,31 @@ fun HomeScreen(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        viewModel.fetchWeather(40.7128, -74.0060)
+    androidx.compose.runtime.LaunchedEffect(locationPermissions.allPermissionsGranted) {
+        try {
+            if (locationPermissions.allPermissionsGranted) {
+                try {
+                    val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+                    val location = locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER) 
+                        ?: locationManager.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                    if (location != null) {
+                        viewModel.fetchWeather(location.latitude, location.longitude)
+                    } else {
+                        viewModel.fetchWeather(28.6139, 77.2090)
+                    }
+                } catch (e: SecurityException) {
+                    viewModel.fetchWeather(28.6139, 77.2090)
+                } catch (e: Exception) {
+                    viewModel.fetchWeather(28.6139, 77.2090)
+                }
+            } else {
+                locationPermissions.launchMultiplePermissionRequest()
+                // Fetch fallback immediately while waiting for permission
+                viewModel.fetchWeather(28.6139, 77.2090)
+            }
+        } catch (e: Exception) {
+            viewModel.fetchWeather(28.6139, 77.2090)
+        }
     }
 
     Surface(
@@ -108,7 +144,7 @@ fun HomeScreen(
 
             // AI Insight / Follow-up alert
             item(span = { GridItemSpan(2) }) {
-                val diseasedPlants = plants.filter { it.disease != null && it.disease.isNotBlank() && it.disease != "null" && it.healthStatus != "Healthy" }
+                val diseasedPlants = plants.filter { it.disease != null && it.disease.isNotBlank() && it.disease != "null" && !it.healthStatus.isStatusHealthy() }
                 val insightEmoji = if (diseasedPlants.isNotEmpty()) "🩺" else "✨"
                 val insightTitle = if (diseasedPlants.isNotEmpty()) "Follow-up Required" else "AI Garden Insight"
                 val insightMessage = if (diseasedPlants.isNotEmpty()) {
@@ -282,7 +318,10 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Outdoor Climate", color = EnvTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                            Column {
+                                Text("Outdoor Climate", color = EnvTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                                Text(viewModel.locationName.value, color = EnvTextPrimary.copy(alpha = 0.8f), fontSize = 14.sp)
+                            }
                             Surface(
                                 color = EnvPillBg,
                                 shape = RoundedCornerShape(12.dp)
@@ -362,7 +401,7 @@ fun HomeScreen(
                 }
             } else {
                 items(plants.take(4)) { plant -> // Limit to 4 latest ones
-                    PlantCard(plant, onClick = { onNavigateToPlant(plant.name) })
+                    PlantCard(plant, onClick = { onNavigateToPlant(plant.id) })
                 }
                 
                 if (plants.size > 4) {
@@ -385,8 +424,8 @@ fun HomeScreen(
 
 @Composable
 fun PlantCard(plant: Plant, onClick: () -> Unit) {
-    val healthColor = if (plant.healthStatus.equals("Healthy", ignoreCase = true)) HeroCardBg else AlertTextPrimary
-    val bgColor = if (plant.healthStatus.equals("Healthy", ignoreCase = true)) SurfaceVariant else AlertCardBg
+    val healthColor = if (plant.healthStatus.isStatusHealthy()) HeroCardBg else AlertTextPrimary
+    val bgColor = if (plant.healthStatus.isStatusHealthy()) SurfaceVariant else AlertCardBg
     
     Card(
         colors = CardDefaults.cardColors(containerColor = bgColor),

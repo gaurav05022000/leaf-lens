@@ -3,6 +3,7 @@ package com.example.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -100,6 +101,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
+                    .imePadding()
                     .padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -114,7 +116,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                         contentAlignment = Alignment.Center
                     ) {
                         Image(
-                            painter = painterResource(id = com.example.R.drawable.app_logo_1781429616941),
+                            painter = painterResource(id = com.example.R.drawable.playstore_icon),
                             contentDescription = "Logo",
                             modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp))
                         )
@@ -159,17 +161,19 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                             placeholder = { Text("Aria Green", color = textColorSecondary) },
                             leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = textColorSecondary) },
                             modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                             colors = TextFieldDefaults.colors(
                                 focusedTextColor = textColorPrimary,
                                 unfocusedTextColor = textColorPrimary,
                                 focusedContainerColor = inputBackground,
                                 unfocusedContainerColor = inputBackground,
                                 focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                                errorIndicatorColor = Color.Transparent
+                            )
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                     }
@@ -179,20 +183,22 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                     TextField(
                         value = email,
                         onValueChange = { email = it },
-                        placeholder = { Text("aria@leaflens.io", color = textColorSecondary) },
+                        placeholder = { Text("Email", color = textColorSecondary) },
                         leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = textColorSecondary) },
                         modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
                         colors = TextFieldDefaults.colors(
                             focusedTextColor = textColorPrimary,
                             unfocusedTextColor = textColorPrimary,
                             focusedContainerColor = inputBackground,
                             unfocusedContainerColor = inputBackground,
                             focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next)
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                            errorIndicatorColor = Color.Transparent
+                        )
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -215,17 +221,19 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                         },
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         colors = TextFieldDefaults.colors(
                             focusedTextColor = textColorPrimary,
                             unfocusedTextColor = textColorPrimary,
                             focusedContainerColor = inputBackground,
                             unfocusedContainerColor = inputBackground,
                             focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                            errorIndicatorColor = Color.Transparent
                         ),
-                        shape = RoundedCornerShape(16.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = {
                             if (rememberMe) {
                                 prefs.edit().putString("saved_email", email).apply()
@@ -285,7 +293,12 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                             )
                             Text("Remember me", fontSize = 12.sp, color = textColorPrimary)
                         }
-                        Text("Forgot?", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = textColorPrimary, modifier = Modifier.clickable { viewModel.resetPassword(email) })
+                        TextButton(
+                            onClick = { viewModel.resetPassword(email) },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("Forgot?", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = textColorPrimary)
+                        }
                     }
                 }
 
@@ -294,6 +307,14 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                     Text(
                         text = (uiState as LoginUiState.Error).message,
                         color = AlertTextPrimary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (uiState is LoginUiState.Message) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = (uiState as LoginUiState.Message).message,
+                        color = leafGreenDark,
                         fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -331,6 +352,67 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // "Or continue with" Divider
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = textColorSecondary.copy(alpha = 0.3f)
+                    )
+                    Text(
+                        text = "Or continue with",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        fontSize = 12.sp,
+                        color = textColorSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = textColorSecondary.copy(alpha = 0.3f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Google Login Button
+                OutlinedButton(
+                    onClick = {
+                        viewModel.loginWithGoogle(context)
+                    },
+                    enabled = uiState != LoginUiState.Loading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = textColorPrimary,
+                        containerColor = if (isDark) Color(0xFF1E2620) else Color(0xFFF4F6F4)
+                    ),
+                    border = BorderStroke(1.dp, textColorSecondary.copy(alpha = 0.2f))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = com.example.R.drawable.ic_google_logo),
+                            contentDescription = "Google Logo",
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (isSignUp) "Sign up with Google" else "Sign in with Google",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColorPrimary
+                        )
                     }
                 }
 

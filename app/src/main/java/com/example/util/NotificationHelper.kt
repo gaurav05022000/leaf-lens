@@ -1,4 +1,5 @@
 package com.example.util
+import com.example.data.isStatusHealthy
 
 import android.content.Context
 import androidx.work.Data
@@ -67,7 +68,7 @@ object NotificationHelper {
 
         // 3. Daily Disease Checkup Reminder
         val diseaseWorkName = "disease_${plant.id}"
-        if (plant.disease != null && plant.disease.isNotBlank() && plant.disease != "null" && plant.healthStatus != "Healthy") {
+        if (plant.disease != null && plant.disease.isNotBlank() && plant.disease != "null" && !plant.healthStatus.isStatusHealthy()) {
             val diseaseData = Data.Builder()
                 .putString("plantName", plant.name)
                 .putString("action", "checkup")

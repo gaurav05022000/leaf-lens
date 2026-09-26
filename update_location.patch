@@ -1,0 +1,49 @@
+--- app/src/main/java/com/example/ui/HomeScreen.kt
++++ app/src/main/java/com/example/ui/HomeScreen.kt
+@@ -45,17 +45,46 @@
+         
+     val context = androidx.compose.ui.platform.LocalContext.current
++    val locationPermissions = com.google.accompanist.permissions.rememberMultiplePermissionsState(
++        permissions = listOf(
++            android.Manifest.permission.ACCESS_FINE_LOCATION,
++            android.Manifest.permission.ACCESS_COARSE_LOCATION
++        )
++    )
++    
+     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+         val notificationPermission = com.google.accompanist.permissions.rememberPermissionState(
+             android.Manifest.permission.POST_NOTIFICATIONS
+         )
+         androidx.compose.runtime.LaunchedEffect(Unit) {
+             if (!notificationPermission.status.isGranted) {
+                 notificationPermission.launchPermissionRequest()
+             }
+         }
+     }
+ 
+-    androidx.compose.runtime.LaunchedEffect(Unit) {
+-        viewModel.fetchWeather(40.7128, -74.0060)
++    androidx.compose.runtime.LaunchedEffect(locationPermissions.allPermissionsGranted) {
++        if (locationPermissions.allPermissionsGranted) {
++            try {
++                val fusedLocationClient = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(context)
++                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
++                    if (location != null) {
++                        viewModel.fetchWeather(location.latitude, location.longitude)
++                    } else {
++                        // Fallback to New Delhi if location is null
++                        viewModel.fetchWeather(28.6139, 77.2090)
++                    }
++                }.addOnFailureListener {
++                    viewModel.fetchWeather(28.6139, 77.2090)
++                }
++            } catch (e: SecurityException) {
++                viewModel.fetchWeather(28.6139, 77.2090)
++            }
++        } else {
++            locationPermissions.launchMultiplePermissionRequest()
++            viewModel.fetchWeather(28.6139, 77.2090) // Fallback initially
++        }
+     }
+ 
+     Surface(

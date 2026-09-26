@@ -20,6 +20,14 @@ data class Plant(
     val imageUri: String? = null,
     val description: String = "",
     val similarImageUris: String = "", // Comma separated list of images
+    val wateringIntervalDays: Int = 7,
+    val fertilizingIntervalDays: Int = 30,
     val isPremium: Boolean = false, // Demo purpose from UI map
     val firestoreId: String? = null
 )
+
+fun String?.isStatusHealthy(): Boolean {
+    if (this == null) return false
+    val lower = this.lowercase()
+    return lower == "healthy" || lower == "excellent" || lower == "good" || lower.contains("healthy")
+}

@@ -88,7 +88,7 @@ fun ScanHistoryCard(item: ScanHistoryItem) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = SurfaceVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -111,51 +111,53 @@ fun ScanHistoryCard(item: ScanHistoryItem) {
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
+            
+            if (!item.imageUrl.isNullOrBlank()) {
+                PlantImage(
+                    model = item.imageUrl,
+                    contentDescription = item.plantName,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .padding(vertical = 8.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
+            
             Text(
                 text = item.species,
                 fontSize = 14.sp,
                 color = TextSecondary,
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                modifier = Modifier.padding(bottom = 8.dp)
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .background(
-                                color = if (item.healthStatus.contains("Healthy", true)) GreenPrimary else AlertRed,
-                                shape = androidx.compose.foundation.shape.CircleShape
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = item.healthStatus,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary
-                    )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val statusColor = when (item.healthStatus.lowercase(Locale.getDefault())) {
+                    "healthy" -> GreenPrimary
+                    "alert", "action required" -> Color(0xFFFF9800)
+                    else -> AlertRed
                 }
-                
-                if (item.disease != null && item.disease.isNotBlank() && item.disease != "null") {
-                    Surface(
-                        color = AlertRed.copy(alpha = 0.1f),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(
-                            text = item.disease,
-                            color = AlertRed,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(statusColor, RoundedCornerShape(4.dp))
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Health: ${item.healthStatus}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary
+                )
+            }
+
+            if (!item.disease.isNullOrBlank() && item.disease != "None") {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Disease: ${item.disease}",
+                    fontSize = 14.sp,
+                    color = AlertRed
+                )
             }
         }
     }

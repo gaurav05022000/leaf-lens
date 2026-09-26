@@ -1,4 +1,6 @@
 [versions]
+generativeAi = "0.9.0"
+firebaseStorage = "21.0.0"
 googleServices = "4.4.2"
 agp = "9.1.1"
 coreKtx = "1.18.0"
@@ -48,6 +50,8 @@ credentials = "1.3.0"
 googleid = "1.1.1"
 
 [libraries]
+generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeAi" }
+firebase-storage = { group = "com.google.firebase", name = "firebase-storage-ktx", version.ref = "firebaseStorage" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

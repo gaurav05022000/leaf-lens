@@ -1,4 +1,5 @@
 package com.example.ui
+import com.example.data.isStatusHealthy
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -39,13 +40,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlantProfileScreen(
-    plantName: String, 
+    plantId: Int, 
     onBack: () -> Unit,
-    onRescanClick: () -> Unit = {},
+    onRescanClick: (String) -> Unit = {},
     onChatClick: (String) -> Unit = {},
     viewModel: HomeViewModel = viewModel()
 ) {
-    val plant by viewModel.getPlantByNameFlow(plantName).collectAsState(initial = null)
+    val plant by viewModel.getPlantByIdFlow(plantId).collectAsState(initial = null)
     val scrollState = rememberScrollState()
     
     var showDatePicker by remember { mutableStateOf(false) }
@@ -82,7 +83,7 @@ fun PlantProfileScreen(
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
-                title = { Text(plantName, fontWeight = FontWeight.Bold) },
+                title = { Text(plant?.name ?: "", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -124,7 +125,7 @@ fun PlantProfileScreen(
                         
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Button(
-                                onClick = { onRescanClick() },
+                                onClick = { plant?.name?.let { onRescanClick(it) } },
                                 colors = ButtonDefaults.buttonColors(containerColor = HeroCardBg),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
@@ -149,7 +150,7 @@ fun PlantProfileScreen(
                         contentPadding = PaddingValues(bottom = 16.dp)
                     ) {
                         val images = mutableListOf<String>()
-                        if (livePlant.imageUri != null) {
+                        if (!livePlant.imageUri.isNullOrEmpty()) {
                             images.add(livePlant.imageUri)
                         }
                         if (livePlant.similarImageUris.isNotBlank()) {
@@ -158,7 +159,7 @@ fun PlantProfileScreen(
                         
                         items(images.size) { index ->
                             val url = images[index]
-                            coil.compose.AsyncImage(
+                            PlantImage(
                                 model = url,
                                 contentDescription = "Plant image",
                                 modifier = Modifier
@@ -205,7 +206,8 @@ fun PlantProfileScreen(
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Watering Status", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    val waterTitle = if (livePlant.wateringIntervalDays > 0) "Watering Status (Every ${livePlant.wateringIntervalDays} days)" else "Watering Status"
+                                    Text(waterTitle, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                     val waterText = if (needsWater) "Needs water immediately!" else "Next watering: " + getDaysRemaining(livePlant.nextWateringTimeMs, timeNow)
                                     Text(
                                         text = waterText,
@@ -233,7 +235,8 @@ fun PlantProfileScreen(
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Fertilizer Status", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                    val fertilizeTitle = if (livePlant.fertilizingIntervalDays > 0) "Fertilizer Status (Every ${livePlant.fertilizingIntervalDays} days)" else "Fertilizer Status"
+                                    Text(fertilizeTitle, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                     val fertilizeText = if (needsFertilizer) "Requires fertilization tracker!" else "Next feeding: " + getDaysRemaining(livePlant.nextFeedingTimeMs, timeNow)
                                     Text(
                                         text = fertilizeText,
@@ -251,7 +254,7 @@ fun PlantProfileScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val isHealthy = livePlant.healthStatus.equals("Healthy", ignoreCase = true)
+                                val isHealthy = livePlant.healthStatus.isStatusHealthy()
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
@@ -322,7 +325,7 @@ fun PlantProfileScreen(
                             ) {
                                 Text("Plant Healthy?", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, fontSize = 14.sp)
                                 Switch(
-                                    checked = livePlant.healthStatus.equals("Healthy", ignoreCase = true),
+                                    checked = livePlant.healthStatus.isStatusHealthy(),
                                     onCheckedChange = { isChecked ->
                                         viewModel.updatePlantHealth(livePlant, isChecked)
                                     },

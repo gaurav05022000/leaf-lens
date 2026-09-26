@@ -32,7 +32,7 @@ object PointsManager {
     private lateinit var database: AppDatabase
 
     private var deviceId: String = ""
-    private fun getUserId(): String = auth?.currentUser?.uid ?: deviceId
+    private fun getUserId(): String? = auth?.currentUser?.uid
 
     fun initialize(context: Context) {
         val prefs = context.getSharedPreferences("flora_points_prefs", Context.MODE_PRIVATE)
@@ -85,7 +85,7 @@ object PointsManager {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.d("PointsManager", "Saving point transaction to Firestore...")
-                val uid = getUserId()
+                val uid = getUserId() ?: return@launch
                 val db = firestore ?: return@launch
                 val map = mapOf(
                     "title" to trx.title,
@@ -121,7 +121,7 @@ object PointsManager {
     }
 
     fun syncFromFirestore() {
-        val uid = getUserId()
+        val uid = getUserId() ?: return
         val db = firestore ?: return
         
         // Listen for points changes
@@ -133,8 +133,8 @@ object PointsManager {
             }
 
             if (snapshot != null && snapshot.exists() && snapshot.contains("availablePoints") && snapshot.contains("totalScans")) {
-                val cloudPoints = snapshot.getLong("availablePoints")?.toInt() ?: 0
-                val cloudScans = snapshot.getLong("totalScans")?.toInt() ?: 0
+                val cloudPoints = try { snapshot.getLong("availablePoints")?.toInt() ?: 0 } catch (e: Exception) { 0 }
+                val cloudScans = try { snapshot.getLong("totalScans")?.toInt() ?: 0 } catch (e: Exception) { 0 }
                 
                 // If cloud has advanced, pull
                 if (cloudScans >= _totalScans.value || cloudPoints != _availablePoints.value) {
@@ -202,7 +202,7 @@ object PointsManager {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.d("PointsManager", "Syncing points to Firestore...")
-                val uid = getUserId()
+                val uid = getUserId() ?: return@launch
                 val db = firestore ?: return@launch
                 val data = mapOf(
                     "availablePoints" to _availablePoints.value,

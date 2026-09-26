@@ -55,8 +55,18 @@ class PlantRepository private constructor(private val context: Context) {
 
                     if (snapshot != null) {
                         val plants = snapshot.documents.mapNotNull { doc ->
-                            val p = doc.toObject(Plant::class.java)
-                            p?.copy(firestoreId = doc.id)
+                            try {
+                                val p = doc.toObject(Plant::class.java)
+                                p?.copy(
+                                    firestoreId = doc.id,
+                                    name = p.name ?: "Unknown",
+                                    species = p.species ?: "",
+                                    healthStatus = p.healthStatus ?: "Unknown"
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.e("PlantRepository", "Failed to parse plant doc", e)
+                                null
+                            }
                         }
                         _allPlants.value = plants
                     }

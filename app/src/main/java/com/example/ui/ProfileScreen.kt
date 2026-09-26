@@ -3,6 +3,10 @@ package com.example.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
@@ -11,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
@@ -19,16 +24,23 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.ui.theme.*
 
 @Composable
 fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanHistoryClick: () -> Unit = {}, onPointsHistoryClick: () -> Unit = {}) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var userName by remember { mutableStateOf("User") }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editName by remember { mutableStateOf("") }
+    
     val scanCount by PointsManager.totalScans.collectAsState()
     val availablePoints by PointsManager.availablePoints.collectAsState()
     
@@ -38,6 +50,7 @@ fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanH
             val user = auth.currentUser
             if (user != null) {
                 userName = user.displayName?.takeIf { it.isNotBlank() } ?: user.email ?: "User"
+                photoUri = user.photoUrl
             }
         } catch (e: Exception) {
             // Offline
@@ -45,6 +58,43 @@ fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanH
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundLight) {
+        if (showEditDialog) {
+            AlertDialog(
+                onDismissRequest = { showEditDialog = false },
+                title = { Text("Edit Profile") },
+                text = {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        userName = editName
+                        showEditDialog = false
+                        try {
+                            val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                            user?.updateProfile(
+                                com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                                    .setDisplayName(editName)
+                                    .build()
+                            )
+                        } catch (e: Exception) {}
+                    }) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showEditDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
@@ -68,11 +118,29 @@ fun ProfileScreen(onLogout: () -> Unit, onUpgradeClick: () -> Unit = {}, onScanH
                             modifier = Modifier.size(64.dp).background(Color.White, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("👤", fontSize = 32.sp)
+                            if (photoUri != null) {
+                                AsyncImage(
+                                    model = photoUri,
+                                    contentDescription = "Profile Picture",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                Text("👤", fontSize = 32.sp)
+                            }
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(userName, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = EnvTextPrimary)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(userName, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = EnvTextPrimary, modifier = Modifier.weight(1f, fill = false))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(onClick = { 
+                                    editName = userName
+                                    showEditDialog = true 
+                                }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit Name", tint = EnvTextPrimary, modifier = Modifier.size(16.dp))
+                                }
+                            }
                             Text("Total Scans: $scanCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HeroCardBg)
                             
                             Text("Available Points: $availablePoints", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = HeroCardBg)

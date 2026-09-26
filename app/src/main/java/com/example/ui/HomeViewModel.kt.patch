@@ -1,0 +1,46 @@
+--- app/src/main/java/com/example/ui/HomeViewModel.kt
++++ app/src/main/java/com/example/ui/HomeViewModel.kt
+@@ -10,6 +10,7 @@
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.flow.stateIn
+ import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
+ 
+ class HomeViewModel(application: Application) : AndroidViewModel(application) {
+@@ -139,12 +140,32 @@
+     var weatherData = androidx.compose.runtime.mutableStateOf<com.example.api.WeatherResponse?>(null)
+         private set
+ 
++    var locationName = androidx.compose.runtime.mutableStateOf<String>("Unknown Location")
++        private set
++
+     fun fetchWeather(lat: Double, lon: Double) {
+         viewModelScope.launch {
+             try {
+                 weatherData.value = com.example.api.WeatherApi.retrofitService.getCurrentWeather(lat, lon)
++                launch(Dispatchers.IO) {
++                    try {
++                        val geocoder = android.location.Geocoder(getApplication(), java.util.Locale.getDefault())
++                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
++                            geocoder.getFromLocation(lat, lon, 1, object : android.location.Geocoder.GeocodeListener {
++                                override fun onGeocode(addresses: MutableList<android.location.Address>) {
++                                    if (addresses.isNotEmpty()) {
++                                        locationName.value = addresses[0].locality ?: addresses[0].subAdminArea ?: "Unknown Location"
++                                    }
++                                }
++                            })
++                        } else {
++                            @Suppress("DEPRECATION")
++                            val addresses = geocoder.getFromLocation(lat, lon, 1)
++                            if (!addresses.isNullOrEmpty()) {
++                                locationName.value = addresses[0].locality ?: addresses[0].subAdminArea ?: "Unknown Location"
++                            }
++                        }
++                    } catch (e: Exception) {
++                        e.printStackTrace()
++                    }
++                }
+             } catch (e: Exception) {
+                 e.printStackTrace()
+             }
