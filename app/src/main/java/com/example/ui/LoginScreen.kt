@@ -38,11 +38,22 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import com.example.ui.theme.*
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx.lifecycle.viewmodel.compose.viewModel()) {
+fun LoginScreen(
+    onLoginSuccess: () -> Unit,
+    onBack: (() -> Unit)? = null,
+    viewModel: LoginViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
+    if (onBack != null) {
+        BackHandler {
+            onBack()
+        }
+    }
     val context = LocalContext.current
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -66,7 +77,6 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
 
     LaunchedEffect(uiState) {
         if (uiState is LoginUiState.Success) {
-            com.example.ui.PointsManager.syncFromFirestore()
             com.example.ui.ScanHistoryManager.syncWithFirestore()
             onLoginSuccess()
         }
@@ -97,6 +107,21 @@ fun LoginScreen(onLoginSuccess: () -> Unit, viewModel: LoginViewModel = androidx
                 .padding(horizontal = 20.dp, vertical = 24.dp)
                 .background(cardBackground, RoundedCornerShape(32.dp))
         ) {
+            if (onBack != null) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = textColorPrimary
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()

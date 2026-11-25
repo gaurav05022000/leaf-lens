@@ -28,6 +28,10 @@ data class Plant(
 
 fun String?.isStatusHealthy(): Boolean {
     if (this == null) return false
-    val lower = this.lowercase()
-    return lower == "healthy" || lower == "excellent" || lower == "good" || lower.contains("healthy")
+    return trim().lowercase(java.util.Locale.ROOT) in setOf("healthy", "excellent", "good")
 }
+
+/** New results use newlines; keep historical pipe/comma lists readable. */
+fun String.careItems(): List<String> =
+    (if ('\n' in this || '|' in this) split('\n', '|') else split(','))
+        .map { it.trim() }.filter { it.isNotBlank() }

@@ -147,8 +147,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     var weatherData = androidx.compose.runtime.mutableStateOf<com.example.api.WeatherResponse?>(null)
         private set
 
-    var locationName = androidx.compose.runtime.mutableStateOf<String>("Loading Location...")
+    var locationName = androidx.compose.runtime.mutableStateOf<String>("Local Garden")
         private set
+
+    fun setLocationUnavailable() {
+        locationName.value = "Local Garden"
+    }
 
     fun fetchWeather(lat: Double, lon: Double) {
         viewModelScope.launch {

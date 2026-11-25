@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
@@ -22,7 +23,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,6 +48,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.theme.*
+import com.example.data.careItems
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +56,7 @@ import kotlinx.coroutines.launch
 fun ScannerScreen(
     existingPlantName: String? = null,
     onBack: () -> Unit,
+    onNavigateToPaywall: () -> Unit = {},
     viewModel: ScannerViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -77,6 +82,28 @@ fun ScannerScreen(
     val isScanning by viewModel.isScanning.collectAsState()
     val error by viewModel.error.collectAsState()
 
+    val isPremium by SubscriptionManager.isPremium.collectAsState()
+    val isTrialActive by SubscriptionManager.isTrialActive.collectAsState()
+    val trialDaysRemaining by SubscriptionManager.trialDaysRemaining.collectAsState()
+    val dailyFreeScansRemaining by SubscriptionManager.dailyFreeScansRemaining.collectAsState()
+    val hasFullAccess by SubscriptionManager.hasFullAccess.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.clearResult()
+        }
+    }
+
+    BackHandler(enabled = scanResult != null) {
+        viewModel.clearResult()
+    }
+
+    LaunchedEffect(error) {
+        if (error == "DAILY_LIMIT_REACHED") {
+            onNavigateToPaywall()
+        }
+    }
+
     var showConfirmationDialog by remember { mutableStateOf(false) }
     var showLimitDialog by remember { mutableStateOf(false) }
     var pendingBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -101,32 +128,52 @@ fun ScannerScreen(
                     showConfirmationDialog = true
                 } catch (e: Exception) {
                     Log.e("Scanner", "Error analyzing image", e)
+                    android.widget.Toast.makeText(context, "Could not read the photo. Please try again.", android.widget.Toast.LENGTH_LONG).show()
                 } finally {
                     image.close()
                 }
             }
             override fun onError(exception: ImageCaptureException) {
                 Log.e("Scanner", "Capture failed", exception)
+                android.widget.Toast.makeText(context, "Could not take the photo. Please try again.", android.widget.Toast.LENGTH_LONG).show()
             }
         })
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
+        ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         uri?.let {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                val source = android.graphics.ImageDecoder.createSource(context.contentResolver, it)
-                val bitmap = android.graphics.ImageDecoder.decodeBitmap(source)
-                // convert hardware bitmap to software for processing if needed, but Gemini API needs base64
-                val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
-                pendingBitmap = softwareBitmap
-                showConfirmationDialog = true
-            } else {
-                @Suppress("DEPRECATION")
-                val bmp = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, it)
-                pendingBitmap = bmp
-                showConfirmationDialog = true
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    val source = android.graphics.ImageDecoder.createSource(context.contentResolver, it)
+                    val bitmap = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                        val scale = minOf(1.0, 1200.0 / maxOf(info.size.width, info.size.height))
+                        decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+                        decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    }
+                    pendingBitmap = bitmap
+                    showConfirmationDialog = true
+                } else {
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(it)?.use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+                    }
+                    val options = android.graphics.BitmapFactory.Options()
+                    while (maxOf(bounds.outWidth, bounds.outHeight) / options.inSampleSize > 1200) {
+                        options.inSampleSize *= 2
+                    }
+                    val bmp = context.contentResolver.openInputStream(it)?.use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream, null, options)
+                    }
+                    if (bmp != null) {
+                        pendingBitmap = bmp
+                        showConfirmationDialog = true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Scanner", "Failed to decode gallery image", e)
+                android.widget.Toast.makeText(context, "Could not open that image. Please choose another photo.", android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -160,11 +207,9 @@ fun ScannerScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            val availablePoints = PointsManager.availablePoints.value
-                            
-                            if (availablePoints < 10) {
+                            if (!SubscriptionManager.canScan()) {
                                 showConfirmationDialog = false
-                                android.widget.Toast.makeText(context, "Low points! You need at least 10 points for your next scan.", android.widget.Toast.LENGTH_LONG).show()
+                                onNavigateToPaywall()
                             } else {
                                 selectedBitmap = pendingBitmap
                                 viewModel.scanPlant(pendingBitmap!!)
@@ -214,6 +259,64 @@ fun ScannerScreen(
 
             // Scanning Frame Overlay
             AnimatedScannerOverlay(isScanning = isScanning)
+
+            // Top Control Bar (Back + Subscription Badge)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        viewModel.clearResult()
+                        onBack()
+                    },
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isPremium) HeroCardBg else if (isTrialActive) Color(0xFF2E7D32) else AlertCardBg,
+                    modifier = Modifier.clickable {
+                        if (!isPremium) {
+                            onNavigateToPaywall()
+                        }
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val label = when {
+                            isPremium -> "🌿 Premium Unlimited"
+                            isTrialActive -> "✨ Trial: $dailyFreeScansRemaining/3 scans today ($trialDaysRemaining day${if (trialDaysRemaining > 1) "s" else ""} left)"
+                            else -> "🔒 Trial Expired • Purchase Plan"
+                        }
+                        Text(
+                            text = label,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (!isPremium) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("⚡", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
 
             // Status Pill
             if (isScanning || scanResult == null) {
@@ -336,7 +439,7 @@ fun ScannerScreen(
                                         if (res.severityLevel != null) {
                                             Text("Severity: ${res.severityLevel}", color = Color(0xFFC62828))
                                         }
-                                        val symptomsList = res.symptoms.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                        val symptomsList = res.symptoms.careItems()
                                         if (symptomsList.isNotEmpty()) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Text("Symptoms:", fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
@@ -349,7 +452,7 @@ fun ScannerScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
                             }
                             
-                            val careTipsList = res.careTips.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            val careTipsList = res.careTips.careItems()
                             if (careTipsList.isNotEmpty()) {
                                 Text("Actionable Care Tips", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -367,7 +470,7 @@ fun ScannerScreen(
                                 Spacer(modifier = Modifier.height(16.dp))
                             }
                             
-                            val treatmentList = res.treatmentSteps.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            val treatmentList = res.treatmentSteps.careItems()
                             if (treatmentList.isNotEmpty()) {
                                 Text("Recommended Treatment", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -401,8 +504,12 @@ fun ScannerScreen(
                                 val currentCount = prefs.getInt("save_count", 0) + 1
                                 prefs.edit().putInt("save_count", currentCount).apply()
                                 
-                                if (currentCount % 3 == 0) {
-                                    AdManager.showInterstitial(context as android.app.Activity) {
+                                val activity = generateSequence(context) { 
+                                    if (it is android.content.ContextWrapper) it.baseContext else null 
+                                }.firstOrNull { it is android.app.Activity } as? android.app.Activity
+
+                                if (currentCount % 3 == 0 && activity != null) {
+                                    AdManager.showInterstitial(activity) {
                                         onBack() 
                                     }
                                 } else {
@@ -416,23 +523,23 @@ fun ScannerScreen(
                         ) {
                             Text("Save to Collection")
                         }
-                        TextButton(
-                            onClick = { 
-                                viewModel.reportIssue(res)
-                                android.widget.Toast.makeText(context, "Report submitted. Thank you!", android.widget.Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Report Incorrect Result", color = Color.Gray)
-                        }
-                        TextButton(
-                            onClick = { 
-                                viewModel.clearResult()
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Retry Scan", color = HeroCardBg)
-                        }
+                        // TextButton(
+                        //     onClick = { 
+                        //         viewModel.reportIssue(res)
+                        //         android.widget.Toast.makeText(context, "Report submitted. Thank you!", android.widget.Toast.LENGTH_SHORT).show()
+                        //     },
+                        //     modifier = Modifier.fillMaxWidth()
+                        // ) {
+                        //     Text("Report Incorrect Result", color = Color.Gray)
+                        // }
+                        // TextButton(
+                        //     onClick = { 
+                        //         viewModel.clearResult()
+                        //     },
+                        //     modifier = Modifier.fillMaxWidth()
+                        // ) {
+                        //     Text("Retry Scan", color = HeroCardBg)
+                        // }
                     }
                 }
             } else {
@@ -446,7 +553,13 @@ fun ScannerScreen(
                 ) {
                     // Gallery Button
                     IconButton(
-                        onClick = { galleryLauncher.launch("image/*") },
+                        onClick = {
+                            galleryLauncher.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .size(48.dp)

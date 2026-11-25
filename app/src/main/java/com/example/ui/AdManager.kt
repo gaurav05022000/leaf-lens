@@ -2,7 +2,6 @@ package com.example.ui
 
 import android.app.Activity
 import android.util.Log
-import com.example.ui.PointsManager
 import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
@@ -11,17 +10,21 @@ import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import java.util.concurrent.atomic.AtomicBoolean
 
 object AdManager {
+    private const val TAG = "AdManager"
     private var interstitialAd: InterstitialAd? = null
     private var rewardedAd: RewardedAd? = null
+    private val isShowingAd = AtomicBoolean(false)
     
-    // Sample AdMob unit IDs for testing
+    // Sample AdMob unit IDs
     private const val INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-1350477690991328/1140772950"
     private const val REWARDED_AD_UNIT_ID = "ca-app-pub-1350477690991328/7447959765"
 
     fun loadInterstitial(activity: Activity) {
         try {
+            if (activity.isFinishing || activity.isDestroyed || SubscriptionManager.isPremium.value) return
             val adRequest = AdRequest.Builder().build()
             InterstitialAd.load(activity, INTERSTITIAL_AD_UNIT_ID, adRequest,
                 object : InterstitialAdLoadCallback() {
@@ -29,31 +32,37 @@ object AdManager {
                         interstitialAd = ad
                     }
                     override fun onAdFailedToLoad(adError: LoadAdError) {
+                        Log.d(TAG, "Interstitial not loaded: ${adError.message}")
                         interstitialAd = null
                     }
                 })
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.d(TAG, "Interstitial exception: ${e.message}")
         }
     }
 
     fun showInterstitial(activity: Activity, onAdDismissed: () -> Unit) {
-        if (interstitialAd != null) {
-            interstitialAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
+        if (activity.isFinishing || activity.isDestroyed || SubscriptionManager.isPremium.value) {
+            onAdDismissed()
+            return
+        }
+        val ad = interstitialAd
+        if (ad != null && isShowingAd.compareAndSet(false, true)) {
+            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdDismissedFullScreenContent() {
                     interstitialAd = null
-                    // Preload the next one
+                    isShowingAd.set(false)
                     loadInterstitial(activity)
                     onAdDismissed()
                 }
                 override fun onAdFailedToShowFullScreenContent(adError: AdError) {
                     interstitialAd = null
+                    isShowingAd.set(false)
                     onAdDismissed()
                 }
             }
-            interstitialAd?.show(activity)
+            ad.show(activity)
         } else {
-            // Ad not ready, just proceed
             loadInterstitial(activity)
             onAdDismissed()
         }
@@ -61,6 +70,7 @@ object AdManager {
 
     fun loadRewarded(activity: Activity) {
         try {
+            if (activity.isFinishing || activity.isDestroyed || SubscriptionManager.isPremium.value) return
             val adRequest = AdRequest.Builder().build()
             RewardedAd.load(activity, REWARDED_AD_UNIT_ID, adRequest,
                 object : RewardedAdLoadCallback() {
@@ -68,72 +78,43 @@ object AdManager {
                         rewardedAd = ad
                     }
                     override fun onAdFailedToLoad(adError: LoadAdError) {
+                        Log.d(TAG, "Rewarded not loaded: ${adError.message}")
                         rewardedAd = null
                     }
                 })
         } catch(e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-
-    fun canWatchRewardedAd(activity: Activity): Boolean {
-        val prefs = activity.getSharedPreferences("flora_points_prefs", android.content.Context.MODE_PRIVATE)
-        val lastDate = prefs.getString("last_ad_date", "")
-        val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        if (lastDate != currentDate) {
-            return true
-        }
-        val count = prefs.getInt("ad_watch_count", 0)
-        return count < 2
-    }
-
-    fun recordRewardedAdWatched(activity: Activity) {
-        val prefs = activity.getSharedPreferences("flora_points_prefs", android.content.Context.MODE_PRIVATE)
-        val lastDate = prefs.getString("last_ad_date", "")
-        val currentDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        if (lastDate != currentDate) {
-            prefs.edit()
-                .putString("last_ad_date", currentDate)
-                .putInt("ad_watch_count", 1)
-                .apply()
-        } else {
-            val count = prefs.getInt("ad_watch_count", 0)
-            prefs.edit().putInt("ad_watch_count", count + 1).apply()
+            Log.d(TAG, "Rewarded exception: ${e.message}")
         }
     }
 
     fun showRewarded(activity: Activity, onRewardEarned: () -> Unit, onAdDismissed: () -> Unit = {}) {
-
-        if (rewardedAd != null) {
-            rewardedAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
+        if (activity.isFinishing || activity.isDestroyed) {
+            onAdDismissed()
+            return
+        }
+        val ad = rewardedAd
+        if (ad != null && isShowingAd.compareAndSet(false, true)) {
+            val rewardGranted = AtomicBoolean(false)
+            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdDismissedFullScreenContent() {
                     rewardedAd = null
-                    // Preload the next one
+                    isShowingAd.set(false)
                     loadRewarded(activity)
                     onAdDismissed()
                 }
                 override fun onAdFailedToShowFullScreenContent(error: AdError) {
                     rewardedAd = null
+                    isShowingAd.set(false)
                     onAdDismissed()
                 }
             }
-            rewardedAd?.show(activity) { rewardItem ->
-                // Reward the user!
-                recordRewardedAdWatched(activity)
-                PointsManager.addPoints(5, "Watched Ad")
-                onRewardEarned()
+            ad.show(activity) { _ ->
+                if (rewardGranted.compareAndSet(false, true)) {
+                    onRewardEarned()
+                }
             }
         } else {
-            // Ad not ready - simulate ad popup
-            android.app.AlertDialog.Builder(activity)
-                .setTitle("Ad Not Ready")
-                .setMessage("No video ad is currently available. Please try again in a moment.")
-                .setPositiveButton("OK") { _, _ ->
-                    onAdDismissed()
-                }
-                .setCancelable(false)
-                .show()
+            onAdDismissed()
         }
     }
 }

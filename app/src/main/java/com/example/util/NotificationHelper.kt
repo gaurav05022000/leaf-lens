@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 object NotificationHelper {
 
     fun schedulePlantReminders(context: Context, plant: Plant) {
+        val uid = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (_: Exception) { null } ?: return
         val workManager = WorkManager.getInstance(context)
         val timeNow = System.currentTimeMillis()
 
@@ -23,6 +24,7 @@ object NotificationHelper {
         if (plant.nextWateringTimeMs > timeNow) {
             val waterDelay = plant.nextWateringTimeMs - timeNow
             val waterData = Data.Builder()
+                .putString("userId", uid)
                 .putString("plantName", plant.name)
                 .putString("action", "water")
                 .putInt("notificationId", (plant.id * 10) + 1)
@@ -47,6 +49,7 @@ object NotificationHelper {
         if (plant.nextFeedingTimeMs > timeNow) {
             val feedDelay = plant.nextFeedingTimeMs - timeNow
             val feedData = Data.Builder()
+                .putString("userId", uid)
                 .putString("plantName", plant.name)
                 .putString("action", "feed")
                 .putInt("notificationId", (plant.id * 10) + 2)
@@ -70,6 +73,7 @@ object NotificationHelper {
         val diseaseWorkName = "disease_${plant.id}"
         if (plant.disease != null && plant.disease.isNotBlank() && plant.disease != "null" && !plant.healthStatus.isStatusHealthy()) {
             val diseaseData = Data.Builder()
+                .putString("userId", uid)
                 .putString("plantName", plant.name)
                 .putString("action", "checkup")
                 .putString("disease", plant.disease)
@@ -82,7 +86,7 @@ object NotificationHelper {
 
             workManager.enqueueUniquePeriodicWork(
                 diseaseWorkName,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 diseaseWorkRequest
             )
         } else {

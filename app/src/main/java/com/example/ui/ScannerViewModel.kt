@@ -2,23 +2,23 @@ package com.example.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
-import com.example.api.OpenRouterContentPart
-import com.example.api.OpenRouterImageUrl
-import com.example.api.OpenRouterMessage
-import com.example.api.OpenRouterRequest
-import com.example.api.RetrofitClient
 import com.example.data.Plant
 import com.example.data.PlantRepository
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.content
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import android.util.Base64
 import kotlinx.coroutines.tasks.await
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -29,30 +29,44 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     private val _scanResult = MutableStateFlow<Plant?>(null)
     val scanResult = _scanResult.asStateFlow()
+    private var resultUid: String? = null
 
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
     fun scanPlant(bitmap: Bitmap) {
         if (_isScanning.value) return
-        
-        if (PointsManager.availablePoints.value < 10) {
-            _error.value = "Not enough points to scan. You need 10 points."
-            return
-        }
+
         _isScanning.value = true
         _error.value = null
+        _scanResult.value = null
+        val scanUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (scanUid == null) {
+            _error.value = "Please sign in to scan a plant."
+            _isScanning.value = false
+            return
+        }
 
         viewModelScope.launch {
             try {
-                val base64Image = bitmapToBase64(bitmap)
-                
+                // Verify scan eligibility before calling AI without decrementing scan quota
+                val allowed = ServerUsageManager.canScan()
+                if (!allowed) {
+                    _error.value = "DAILY_LIMIT_REACHED"
+                    _isScanning.value = false
+                    return@launch
+                }
+
+                // Downscale bitmap to max 1200px to prevent OOM
+                val resizedBitmap = resizeBitmap(bitmap, 1200)
+
                 val prompt = """
                     You are LeafLens AI, an expert and friendly plant assistant. Analyze this plant image and provide a comprehensive diagnostic.
                     Specifically evaluate its overall health status, provide actionable steps to improve its health (especially if it has issues), and list all important things to keep in mind for its daily care.
                     Maintain an encouraging and friendly tone.
                     Respond ONLY in JSON format matching this structure:
                     {
+                      "isPlant": true (Boolean; false if the image does not show a plant),
                       "plantName": "String (Common name)",
                       "species": "String (Scientific name)",
                       "disease": "String or null (Identify any diseases, pests, or deficiencies)",
@@ -72,197 +86,152 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     }
                 """.trimIndent()
 
-                val request = OpenRouterRequest(
-                    model = "google/gemini-2.5-flash-lite",
-                    messages = listOf(
-                        OpenRouterMessage(
-                            role = "user",
-                            content = listOf(
-                                OpenRouterContentPart(type = "text", text = prompt),
-                                OpenRouterContentPart(type = "image_url", image_url = OpenRouterImageUrl(url = "data:image/jpeg;base64,$base64Image"))
-                            )
-                        )
-                    ),
-                    response_format = com.example.api.OpenRouterResponseFormat("json_object")
-                )
+                // Firebase AI Logic is called from the client. App Check and backend
+                // authorization are separate; this client quota check is not a security boundary.
+                val generativeModel = Firebase.ai(backend = GenerativeBackend.googleAI())
+                    .generativeModel(modelName = "gemini-2.5-flash-lite")
 
-                if (BuildConfig.OPENROUTER_API_KEY.isBlank()) {
-                    _error.value = "API Key is missing. Please add it in Settings -> Secrets."
-                    _isScanning.value = false
-                    return@launch
+                val inputContent = content {
+                    image(resizedBitmap)
+                    text(prompt)
                 }
 
-                val modelsToTry = listOf("google/gemini-2.5-flash-lite", "google/gemini-2.5-flash")
-                var responseText: String? = null
-                var lastError: Exception? = null
+                val response = kotlinx.coroutines.withTimeout(60_000L) {
+                    generativeModel.generateContent(inputContent)
+                }
+                val text = response.text ?: "{}"
 
-                for (model in modelsToTry) {
-                    try {
-                        val requestWithModel = request.copy(model = model)
-                        val response = RetrofitClient.service.generateContent(
-                            authorization = "Bearer ${BuildConfig.OPENROUTER_API_KEY}",
-                            referer = "https://ai.studio",
-                            title = "LeafLens",
-                            request = requestWithModel
-                        )
-                        responseText = response.choices?.firstOrNull()?.message?.content
-                        if (responseText != null) break
-                    } catch (e: Exception) {
-                        lastError = e
-                        if (e is retrofit2.HttpException && (e.code() == 400 || e.code() == 401 || e.code() == 403 || e.code() == 429)) {
-                            break
-                        }
-                    }
+                val diagnosis = com.example.data.ScanResultParser.parse(text)
+                check(com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == scanUid) {
+                    "Your account changed. Please scan again."
                 }
 
-                if (responseText == null && lastError != null) {
-                    throw lastError
-                }
-
-                val text = responseText ?: "{}"
-                val jsonStartIndex = text.indexOf('{')
-                val jsonEndIndex = text.lastIndexOf('}')
-                if (jsonStartIndex == -1 || jsonEndIndex == -1) {
-                     _error.value = "Could not parse API response. Please try again."
-                     return@launch
-                }
-                
-                val cleanJson = text.substring(jsonStartIndex, jsonEndIndex + 1)
-                val json = JSONObject(cleanJson)
-
-                var imageUrl = ""
+                val localImageUri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { saveImageLocally(resizedBitmap, scanUid) }
+                var imageUrl = localImageUri
                 try {
-                    imageUrl = uploadImageToStorage(bitmap)
+                    val uploaded = uploadImageToStorage(resizedBitmap, scanUid)
+                    if (uploaded.isNotBlank()) {
+                        imageUrl = uploaded
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.w("ScannerViewModel", "Storage upload fallback to local: ${e.message}")
                 }
 
-                val plant = Plant(
-                    name = json.optString("plantName", "Unknown Plant"),
-                    species = json.optString("species", "Unknown Species"),
-                    disease = json.optString("disease").takeIf { it != "null" && it.isNotBlank() },
-                    severityLevel = json.optString("severityLevel").takeIf { it != "null" && it.isNotBlank() },
-                    symptoms = parseJsonArray(json, "symptoms").joinToString(", "),
-                    healthStatus = json.optString("healthStatus", "Unknown"),
-                    healthScore = json.optInt("healthScore", 0),
-                    wateringLevel = json.optString("wateringLevel", "Unknown"),
-                    wateringScore = json.optInt("wateringScore", 0),
-                    wateringIntervalDays = json.optInt("wateringIntervalDays", 7),
-                    fertilizingIntervalDays = json.optInt("fertilizingIntervalDays", 30),
-                    sunlight = json.optString("sunlight", "Unknown"),
-                    sunlightScore = json.optInt("sunlightScore", 0),
-                    description = json.optString("description", ""),
-                    treatmentSteps = parseJsonArray(json, "treatmentSteps").joinToString(", "),
-                    careTips = parseJsonArray(json, "careTips").joinToString(", "),
-                    imageUri = imageUrl 
-                )
+                val generatedId = (System.currentTimeMillis() % 1_000_000_000L).toInt().let { if (it <= 0) kotlin.random.Random.nextInt(1, 999999999) else it }
+                val plant = diagnosis.copy(id = generatedId, imageUri = imageUrl)
+                check(com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid == scanUid) {
+                    "Your account changed. Please scan again."
+                }
 
-                repository.insert(plant)
-                ScanHistoryManager.addScanResult(plant)
+                // Scan successful: deliver result to user
+                resultUid = scanUid
                 _scanResult.value = plant
-                
-                PointsManager.deductPoints(10)
-                PointsManager.incrementScans()
-            } catch (e: retrofit2.HttpException) {
-                if (e.code() == 400 || e.code() == 401 || e.code() == 403) {
-                     _error.value = "API Key error. Ensure your API Key in Secrets is valid."
-                } else if (e.code() == 404) {
-                     _error.value = "Model not found (404). OpenRouter might have changed the model names."
-                } else if (e.code() == 429) {
-                     _error.value = "Rate limit reached. Please try again later."
-                } else if (e.code() == 503) {
-                     _error.value = "AI servers are overloaded. Please try again."
-                } else {
-                     _error.value = "Error ${e.code()}: ${e.message()}"
-                }
+
+                // ONLY NOW: reduce the user's free trial scan count after scan success
+                ServerUsageManager.recordSuccessfulScan(scanUid)
+
+                com.example.util.AnalyticsHelper.logPlantScanned(
+                    diseaseOrHealth = plant.disease ?: plant.healthStatus,
+                    confidence = (plant.healthScore / 100f)
+                )
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                _error.value = "The scan timed out. Check your connection and try again."
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _error.value = "Error: ${e.localizedMessage}"
+                Log.e("ScannerViewModel", "Scan error", e)
+                _error.value = "Error: ${e.localizedMessage ?: "Unable to complete scan. Please try again."}"
             } finally {
                 _isScanning.value = false
             }
         }
     }
-    
+
     fun clearResult() {
+        resultUid = null
         _scanResult.value = null
         _error.value = null
     }
 
-    private fun parseJsonArray(json: JSONObject, key: String): List<String> {
-        val list = mutableListOf<String>()
-        val arr = json.optJSONArray(key)
-        if (arr != null) {
-            for (i in 0 until arr.length()) {
-                list.add(arr.getString(i))
-            }
-        }
-        return list
+    private fun resizeBitmap(bitmap: Bitmap, maxDim: Int): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        if (width <= maxDim && height <= maxDim) return bitmap
+        val scale = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+        val newWidth = (width * scale).toInt().coerceAtLeast(1)
+        val newHeight = (height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
 
-    private fun bitmapToBase64(bitmap: Bitmap): String {
+    private suspend fun uploadImageToStorage(bitmap: Bitmap, uid: String): String {
         val outputStream = ByteArrayOutputStream()
-        val maxDim = 800
-        val scale = Math.min(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height)
-        val scaledBitmap = if (scale < 1) {
-            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
-        } else {
-            bitmap
-        }
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-        return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+        val data = outputStream.toByteArray()
+
+        val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+        check(auth.currentUser?.uid == uid) { "Your account changed. Please scan again." }
+        val filename = "scan_${System.currentTimeMillis()}.jpg"
+        val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("users/$uid/$filename")
+
+        val metadata = com.google.firebase.storage.StorageMetadata.Builder()
+            .setContentType("image/jpeg").build()
+        storageRef.putBytes(data, metadata).await()
+        return storageRef.downloadUrl.await().toString()
     }
 
-    private suspend fun uploadImageToStorage(bitmap: Bitmap): String {
+    private fun saveImageLocally(bitmap: Bitmap, uid: String): String {
         return try {
-            val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-            val data = outputStream.toByteArray()
-            
-            val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-            val uid = auth.currentUser?.uid ?: "anonymous"
-            val filename = "scans_${System.currentTimeMillis()}.jpg"
-            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("users/$uid/$filename")
-            
-            storageRef.putBytes(data).await()
-            val uri = storageRef.downloadUrl.await()
-            uri.toString()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // Fallback to Base64 data URI for Firestore sync
-            try {
-                val outputStream = ByteArrayOutputStream()
-                val scale = Math.min(400f / bitmap.width, 400f / bitmap.height)
-                val scaledBitmap = if (scale < 1) {
-                    Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
-                } else {
-                    bitmap
-                }
-                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
-                val base64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
-                "data:image/jpeg;base64,$base64"
-            } catch (ex: Exception) {
-                ex.printStackTrace()
-                ""
+            val safeUid = uid.replace(Regex("[^A-Za-z0-9_-]"), "_")
+            val imagesDir = File(getApplication<Application>().filesDir, "scans/$safeUid").apply { mkdirs() }
+            val file = File(imagesDir, "scan_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
+            Uri.fromFile(file).toString()
+        } catch (e: Exception) {
+            Log.e("ScannerViewModel", "Failed to save local image", e)
+            ""
         }
     }
 
     fun savePlant(plant: Plant, existingPlantName: String? = null) {
-        // Already saved during scan.
-    }
-    
-    fun reportIssue(plant: Plant) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (uid == null || uid != resultUid) {
+            _scanResult.value = null
+            _error.value = "Your account changed. Please scan again."
+            return
+        }
+        viewModelScope.launch {
             try {
-                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return@launch
-                db.collection("reports").add(mapOf(
-                    "userId" to uid,
-                    "plantName" to plant.name,
-                    "timestamp" to System.currentTimeMillis()
-                ))
+                if (existingPlantName != null) {
+                    val existing = repository.getPlantByNameSync(existingPlantName)
+                    if (existing != null) {
+                        val updated = existing.copy(
+                            healthStatus = plant.healthStatus,
+                            healthScore = plant.healthScore,
+                            disease = plant.disease,
+                            severityLevel = plant.severityLevel,
+                            symptoms = plant.symptoms,
+                            treatmentSteps = plant.treatmentSteps,
+                            careTips = plant.careTips,
+                            description = plant.description,
+                            imageUri = plant.imageUri ?: existing.imageUri
+                        )
+                        repository.update(updated)
+                        ScanHistoryManager.addScanResult(updated)
+                        clearResult()
+                        return@launch
+                    }
+                }
+                repository.insert(plant)
+                ScanHistoryManager.addScanResult(plant)
+                clearResult()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                e.printStackTrace()
+                _error.value = "Could not save the plant. Please sign in and try again."
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.ui.SubscriptionManager
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -11,13 +12,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.AddCircle
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,23 +43,68 @@ import com.example.ui.theme.TextPrimary
 import com.revenuecat.purchases.Purchases
 import com.revenuecat.purchases.PurchasesConfiguration
 
-// Triggering reinstall 4
+private const val APP_CHECK_TAG = "AppCheckInit"
+private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
+private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
+private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
+
+fun configureAppCheck(context: android.content.Context, intent: android.content.Intent?) {
+    try {
+        if (com.google.firebase.FirebaseApp.getApps(context).isEmpty()) {
+            val options = com.google.firebase.FirebaseOptions.fromResource(context)
+            if (options != null) {
+                com.google.firebase.FirebaseApp.initializeApp(context, options)
+            } else {
+                com.google.firebase.FirebaseApp.initializeApp(context)
+            }
+        }
+
+        if (BuildConfig.DEBUG) {
+            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
+            if (!debugToken.isNullOrEmpty()) {
+                val persistenceKey = com.google.firebase.FirebaseApp.getInstance().persistenceKey
+                val prefs = context.getSharedPreferences(
+                    "$DEBUG_STORE_PREFIX$persistenceKey",
+                    android.content.Context.MODE_PRIVATE
+                )
+                prefs.edit()
+                    .putString(DEBUG_SECRET_KEY, debugToken)
+                    .commit()
+                android.util.Log.d(APP_CHECK_TAG, "App Check debug secret configured successfully.")
+            } else {
+                android.util.Log.w(APP_CHECK_TAG, "No debug token found in Intent extra.")
+            }
+
+            com.google.firebase.appcheck.FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+                com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory.getInstance()
+            )
+            android.util.Log.d(APP_CHECK_TAG, "DebugAppCheckProviderFactory installed.")
+        } else {
+            com.google.firebase.appcheck.FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+                com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory.getInstance()
+            )
+            android.util.Log.d(APP_CHECK_TAG, "PlayIntegrityAppCheckProviderFactory installed.")
+        }
+    } catch (e: Exception) {
+        android.util.Log.e(APP_CHECK_TAG, "Failed to initialize Firebase App Check", e)
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configureAppCheck(this, intent)
         
+        // Clean up any corrupt webview / chromium cache from abnormal terminations
         try {
-            if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
-                val options = com.google.firebase.FirebaseOptions.Builder()
-                    .setApiKey(BuildConfig.FIREBASE_API_KEY)
-                    .setApplicationId(BuildConfig.FIREBASE_APP_ID)
-                    .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
-                    .build()
-                com.google.firebase.FirebaseApp.initializeApp(this, options)
+            val webViewCache = java.io.File(cacheDir, "WebView")
+            if (webViewCache.exists()) {
+                val httpCache = java.io.File(webViewCache, "Default/HTTP Cache")
+                if (httpCache.exists()) {
+                    httpCache.deleteRecursively()
+                }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Firebase manual init failed", e)
-        }
+        } catch (_: Exception) {}
 
         try {
             val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
@@ -73,7 +116,7 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            com.example.ui.PointsManager.initialize(this)
+            com.example.util.AnalyticsHelper.initialize(this)
             com.example.ui.ScanHistoryManager.initialize(this)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -81,18 +124,19 @@ class MainActivity : ComponentActivity() {
 
         try {
             val rcKey = BuildConfig.REVENUECAT_API_KEY
-            if (rcKey.isNotEmpty() && rcKey.startsWith("goog_")) {
-                com.revenuecat.purchases.Purchases.logLevel = com.revenuecat.purchases.LogLevel.DEBUG
-                com.revenuecat.purchases.Purchases.configure(com.revenuecat.purchases.PurchasesConfiguration.Builder(this, rcKey).build())
-                android.util.Log.d("RevenueCat", "RevenueCat configured with key starting with: ${rcKey.take(8)}")
-            } else {
-                android.util.Log.e("RevenueCat", "RevenueCat API key is empty or invalid. Key must start with 'goog_'. Paywall will not work.")
-            }
+            com.example.ui.SubscriptionManager.initialize(this, rcKey)
+            val currentUserId = try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (e: Exception) { null }
+            currentUserId?.let { com.example.ui.SubscriptionManager.syncUser(it) }
         } catch (e: Exception) {
-            android.util.Log.e("RevenueCat", "RevenueCat initialization failed", e)
+            android.util.Log.w("RevenueCat", "SubscriptionManager initialization skipped or failed: ${e.message}")
         }
 
         try {
+            val reqConfig = com.google.android.gms.ads.RequestConfiguration.Builder()
+                .setTestDeviceIds(listOf(com.google.android.gms.ads.AdRequest.DEVICE_ID_EMULATOR))
+                .build()
+            com.google.android.gms.ads.MobileAds.setRequestConfiguration(reqConfig)
+
             com.google.android.gms.ads.MobileAds.initialize(this) {
                 runOnUiThread {
                     com.example.ui.AdManager.loadInterstitial(this)
@@ -133,7 +177,6 @@ fun AppNavigation() {
     
     val startDestination = when {
         !hasSeenOnboarding -> "onboarding"
-        !isUserLoggedIn -> "login"
         else -> "main"
     }
 
@@ -144,24 +187,37 @@ fun AppNavigation() {
                     prefs.edit().putBoolean("has_seen_onboarding", true).apply()
                     appOpenCount = 1
                     prefs.edit().putInt("app_open_count", 1).apply()
-                    if (isUserLoggedIn) {
-                        navController.navigate("main") {
-                            popUpTo("onboarding") { inclusive = true }
-                        }
-                    } else {
-                        navController.navigate("login") {
-                            popUpTo("onboarding") { inclusive = true }
-                        }
+                    navController.navigate("main") {
+                        popUpTo("onboarding") { inclusive = true }
+                    }
+                },
+                onLogin = {
+                    prefs.edit().putBoolean("has_seen_onboarding", true).apply()
+                    appOpenCount = 1
+                    prefs.edit().putInt("app_open_count", 1).apply()
+                    navController.navigate("login") {
+                        popUpTo("onboarding") { inclusive = true }
                     }
                 }
             )
         }
         composable("login") {
-            LoginScreen(onLoginSuccess = {
-                navController.navigate("main") {
-                    popUpTo("login") { inclusive = true }
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate("main") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                },
+                onBack = {
+                    if (navController.previousBackStackEntry != null) {
+                        navController.popBackStack()
+                    } else {
+                        navController.navigate("main") {
+                            popUpTo("login") { inclusive = true }
+                        }
+                    }
                 }
-            })
+            )
         }
         composable("main") {
             MainScreen(rootNavController = navController)
@@ -174,6 +230,12 @@ fun MainScreen(rootNavController: NavController) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+
+    LaunchedEffect(currentDestination?.route) {
+        currentDestination?.route?.let { route ->
+            com.example.util.AnalyticsHelper.logScreenView(screenName = route)
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -206,12 +268,17 @@ fun MainScreen(rootNavController: NavController) {
                     label = { Text("Scan") },
                     selected = currentDestination?.hierarchy?.any { it.route == "scan" } == true,
                     onClick = {
-                        navController.navigate("scan") {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                        val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
+                        if (auth?.currentUser == null) {
+                            rootNavController.navigate("login")
+                        } else {
+                            navController.navigate("scan") {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
                             }
-                            launchSingleTop = true
-                            restoreState = true
                         }
                     },
                     colors = navColors
@@ -242,19 +309,6 @@ fun MainScreen(rootNavController: NavController) {
                     },
                     colors = navColors
                 )
-                NavigationBarItem(
-                    icon = { Text("✨", fontSize = 20.sp) },
-                    label = { Text("AI") },
-                    selected = currentDestination?.hierarchy?.any { it.route == "aichat" } == true,
-                    onClick = {
-                        navController.navigate("aichat") {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    colors = navColors
-                )
             }
         }
     ) { innerPadding ->
@@ -265,43 +319,62 @@ fun MainScreen(rootNavController: NavController) {
         ) {
             composable("home") {
                 HomeScreen(
-                    onNavigateToScan = { navController.navigate("scan") },
+                    onNavigateToScan = { 
+                        val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
+                        if (auth?.currentUser == null) {
+                            rootNavController.navigate("login")
+                        } else {
+                            navController.navigate("scan")
+                        }
+                    },
                     onNavigateToPlant = { plantId -> 
                         navController.navigate("plantProfile/$plantId") 
                     },
-                    onNavigateToProfile = { navController.navigate("profile") }
+                    onNavigateToProfile = { navController.navigate("profile") },
+                    onNavigateToCollection = {
+                        navController.navigate("dictionary") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 )
             }
             composable("scan") {
-                ScannerScreen(
-                    onBack = { navController.popBackStack() }
-                )
+                val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
+                if (auth?.currentUser == null) {
+                    LaunchedEffect(Unit) {
+                        rootNavController.navigate("login") {
+                            popUpTo("scan") { inclusive = true }
+                        }
+                    }
+                } else {
+                    ScannerScreen(
+                        onBack = { navController.popBackStack() },
+                        onNavigateToPaywall = { navController.navigate("paywall") }
+                    )
+                }
             }
             composable("rescan/{plantName}") { backStackEntry ->
-                val plantName = backStackEntry.arguments?.getString("plantName")
-                ScannerScreen(
-                    existingPlantName = plantName,
-                    onBack = { navController.popBackStack() }
-                )
+                val auth = try { com.google.firebase.auth.FirebaseAuth.getInstance() } catch(e: Exception) { null }
+                if (auth?.currentUser == null) {
+                    LaunchedEffect(Unit) {
+                        rootNavController.navigate("login")
+                    }
+                } else {
+                    val plantName = backStackEntry.arguments?.getString("plantName")
+                    ScannerScreen(
+                        existingPlantName = plantName,
+                        onBack = { navController.popBackStack() },
+                        onNavigateToPaywall = { navController.navigate("paywall") }
+                    )
+                }
             }
             composable("dictionary") {
                 CollectionScreen(
                     onPlantClick = { plant ->
                         navController.navigate("plantProfile/${plant.id}")
                     }
-                )
-            }
-            composable(
-                route = "aichat?prompt={prompt}",
-                arguments = listOf(androidx.navigation.navArgument("prompt") {
-                    type = androidx.navigation.NavType.StringType
-                    nullable = true
-                })
-            ) { backStackEntry ->
-                val prompt = backStackEntry.arguments?.getString("prompt")
-                com.example.ui.AiChatScreen(
-                    initialPrompt = prompt,
-                    onBack = { navController.popBackStack() }
                 )
             }
             composable(
@@ -317,20 +390,20 @@ fun MainScreen(rootNavController: NavController) {
                     onRescanClick = { plantName ->
                         val encoded = android.net.Uri.encode(plantName)
                         navController.navigate("rescan/$encoded")
-                    },
-                    onChatClick = { prompt ->
-                        val encoded = android.net.Uri.encode(prompt)
-                        navController.navigate("aichat?prompt=$encoded")
                     }
                 )
             }
             composable("profile") {
                 ProfileScreen(
+                    onLoginClick = {
+                        rootNavController.navigate("login")
+                    },
                     onLogout = {
+                        SubscriptionManager.resetUser()
                         try {
-                            com.example.ui.PointsManager.clearLocalData()
-                            com.example.ui.ScanHistoryManager.clearLocalData()
-                            com.google.firebase.auth.FirebaseAuth.getInstance().signOut()
+                            com.google.firebase.auth.FirebaseAuth
+                                .getInstance()
+                                .signOut()
                         } catch(e: Exception) {}
                         
                         rootNavController.navigate("login") {
@@ -342,57 +415,21 @@ fun MainScreen(rootNavController: NavController) {
                     },
                     onScanHistoryClick = {
                         navController.navigate("scanHistory")
-                    },
-                    onPointsHistoryClick = {
-                        navController.navigate("pointsHistory")
                     }
                 )
             }
             composable("scanHistory") {
                 com.example.ui.ScanHistoryScreen(onBackClick = { navController.popBackStack() })
             }
-            composable("pointsHistory") {
-                com.example.ui.PointsHistoryScreen(onBackClick = { navController.popBackStack() })
-            }
-            dialog("paywall") {
-                if (com.revenuecat.purchases.Purchases.isConfigured) {
-                    com.revenuecat.purchases.ui.revenuecatui.Paywall(
-                        options = com.revenuecat.purchases.ui.revenuecatui.PaywallOptions.Builder(
-                            dismissRequest = { navController.popBackStack() }
-                        )
-                        .setListener(
-                            object : com.revenuecat.purchases.ui.revenuecatui.PaywallListener {
-                                override fun onPurchaseCompleted(customerInfo: com.revenuecat.purchases.CustomerInfo, storeTransaction: com.revenuecat.purchases.models.StoreTransaction) {
-                                    android.util.Log.d("RevenueCat", "Purchase completed")
-                                    val purchasedProductId = storeTransaction.productIds.firstOrNull() ?: ""
-                                    val pointsToAdd = when {
-                                        purchasedProductId.contains("1000") -> 1000
-                                        purchasedProductId.contains("500") -> 500
-                                        purchasedProductId.contains("250") -> 250
-                                        purchasedProductId.contains("100") -> 100
-                                        else -> 0
-                                    }
-                                    com.example.ui.PointsManager.addPoints(pointsToAdd)
-                                    navController.popBackStack()
-                                }
-                            }
-                        )
-                        .build()
-                    )
-                } else {
-                    androidx.compose.material3.Card(
-                        modifier = androidx.compose.ui.Modifier.padding(24.dp),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface)
-                    ) {
-                        androidx.compose.foundation.layout.Box(
-                            modifier = androidx.compose.ui.Modifier.padding(24.dp),
-                            contentAlignment = androidx.compose.ui.Alignment.Center
-                        ) {
-                            androidx.compose.material3.Text("RevenueCat is not configured.")
-                        }
+            composable("paywall") {
+                com.example.ui.PaywallScreen(
+                    onDismiss = { navController.popBackStack() },
+                    onSubscribedSuccess = { navController.popBackStack() },
+                    onNavigateToLogin = {
+                        navController.popBackStack()
+                        rootNavController.navigate("login")
                     }
-                }
+                )
             }
         }
     }

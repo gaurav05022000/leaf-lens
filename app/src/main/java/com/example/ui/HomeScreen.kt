@@ -41,6 +41,7 @@ fun HomeScreen(
     onNavigateToScan: () -> Unit,
     onNavigateToPlant: (Int) -> Unit,
     onNavigateToProfile: () -> Unit = {},
+    onNavigateToCollection: () -> Unit = {},
     viewModel: HomeViewModel = viewModel()
 ) {
     val plants by viewModel.allPlants.collectAsState()
@@ -68,29 +69,23 @@ fun HomeScreen(
     }
 
     androidx.compose.runtime.LaunchedEffect(locationPermissions.allPermissionsGranted) {
-        try {
-            if (locationPermissions.allPermissionsGranted) {
-                try {
-                    val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-                    val location = locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER) 
-                        ?: locationManager.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
-                    if (location != null) {
-                        viewModel.fetchWeather(location.latitude, location.longitude)
-                    } else {
-                        viewModel.fetchWeather(28.6139, 77.2090)
-                    }
-                } catch (e: SecurityException) {
-                    viewModel.fetchWeather(28.6139, 77.2090)
-                } catch (e: Exception) {
-                    viewModel.fetchWeather(28.6139, 77.2090)
+        if (locationPermissions.allPermissionsGranted) {
+            try {
+                val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as? android.location.LocationManager
+                val location = locationManager?.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                    ?: locationManager?.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                if (location != null) {
+                    viewModel.fetchWeather(location.latitude, location.longitude)
+                } else {
+                    viewModel.setLocationUnavailable()
                 }
-            } else {
-                locationPermissions.launchMultiplePermissionRequest()
-                // Fetch fallback immediately while waiting for permission
-                viewModel.fetchWeather(28.6139, 77.2090)
+            } catch (e: SecurityException) {
+                viewModel.setLocationUnavailable()
+            } catch (e: Exception) {
+                viewModel.setLocationUnavailable()
             }
-        } catch (e: Exception) {
-            viewModel.fetchWeather(28.6139, 77.2090)
+        } else {
+            viewModel.setLocationUnavailable()
         }
     }
 
@@ -375,10 +370,14 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
+                    if (plants.isNotEmpty()) {
+                        TextButton(onClick = onNavigateToCollection) {
+                            Text("See all", color = HeroCardBg, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
             
-            // Keep Home lightweight; rewarded ads are loaded only after the user taps in Profile.
             item(span = { GridItemSpan(2) }) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -386,7 +385,7 @@ fun HomeScreen(
                     colors = CardDefaults.cardColors(containerColor = SurfaceVariant)
                 ) {
                     Text(
-                        text = "Use points for scans and AI plant care.",
+                        text = "🌿 LeafLens Premium: Unlimited AI scans & expert plant care.",
                         color = TextPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
@@ -400,15 +399,15 @@ fun HomeScreen(
                     Text("Your garden is empty. Scan a plant to get started!", color = TextPrimary)
                 }
             } else {
-                items(plants.take(4)) { plant -> // Limit to 4 latest ones
-                    PlantCard(plant, onClick = { onNavigateToPlant(plant.id) })
+                items(plants.take(4), key = { it.firestoreId ?: it.id.toString() }) { plant -> // Limit to 4 latest ones
+                    PlantCard(plant = plant, onClick = { onNavigateToPlant(plant.id) })
                 }
                 
                 if (plants.size > 4) {
                     val remaining = plants.size - 4
                     item(span = { GridItemSpan(2) }) {
                         OutlinedButton(
-                            onClick = { /* Could navigate to full collection */ },
+                            onClick = onNavigateToCollection,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                             shape = RoundedCornerShape(16.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, TextSecondary.copy(alpha = 0.3f))
@@ -428,32 +427,49 @@ fun PlantCard(plant: Plant, onClick: () -> Unit) {
     val bgColor = if (plant.healthStatus.isStatusHealthy()) SurfaceVariant else AlertCardBg
     
     Card(
+        onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = bgColor),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier.fillMaxWidth().height(160.dp).clickable { onClick() }
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(175.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxSize(),
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Box(
                 modifier = Modifier
-                    .size(50.dp)
+                    .size(68.dp)
                     .clip(CircleShape)
                     .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
-                Text("🌿", fontSize = 24.sp)
+                if (!plant.imageUri.isNullOrEmpty()) {
+                    PlantImage(
+                        model = plant.imageUri,
+                        contentDescription = plant.name,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Text("🌿", fontSize = 28.sp)
+                }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = plant.name,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
                 maxLines = 1,
-                fontSize = 16.sp,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                fontSize = 15.sp,
                 textAlign = TextAlign.Center
             )
             Text(

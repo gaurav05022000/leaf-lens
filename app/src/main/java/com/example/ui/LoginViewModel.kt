@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -13,11 +12,13 @@ import com.example.R
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import com.example.data.PlantRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +29,7 @@ class LoginViewModel : ViewModel() {
     private val auth = try {
         FirebaseAuth.getInstance()
     } catch (e: Exception) {
-        null // Fallback if Firebase not configured
+        null
     }
 
     private val _uiState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
@@ -44,27 +45,17 @@ class LoginViewModel : ViewModel() {
             _uiState.value = LoginUiState.Error("Firebase is not configured. Please add your credentials in Settings -> Secrets.")
             return
         }
-        
+
         _uiState.value = LoginUiState.Loading
         viewModelScope.launch {
             try {
                 val currentAuthInstance = currentAuth ?: return@launch
                 currentAuthInstance.signInWithEmailAndPassword(email, pass).await()
                 currentAuthInstance.currentUser?.uid?.let { uid ->
-                    if (com.revenuecat.purchases.Purchases.isConfigured) {
-                        try {
-                            com.revenuecat.purchases.Purchases.sharedInstance.logIn(uid, object : com.revenuecat.purchases.interfaces.LogInCallback {
-                                override fun onReceived(customerInfo: com.revenuecat.purchases.CustomerInfo, created: Boolean) {}
-                                override fun onError(error: com.revenuecat.purchases.PurchasesError) {
-                                    Log.e("RevenueCat", "Login failed: ${error.message}")
-                                }
-                            })
-                        } catch(e: Exception) {
-                            Log.e("RevenueCat", "Login exception", e)
-                        }
-                    }
+                    SubscriptionManager.syncUser(uid)
+                    com.example.util.AnalyticsHelper.setUserId(uid)
+                    com.example.util.AnalyticsHelper.logEvent("login_email")
                 }
-                PointsManager.syncFromFirestore()
                 ScanHistoryManager.syncWithFirestore()
                 _uiState.value = LoginUiState.Success
             } catch (e: Exception) {
@@ -114,20 +105,10 @@ class LoginViewModel : ViewModel() {
                         val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
                         currentAuth.signInWithCredential(firebaseCredential).await()
                         currentAuth.currentUser?.uid?.let { uid ->
-                            if (com.revenuecat.purchases.Purchases.isConfigured) {
-                                try {
-                                    com.revenuecat.purchases.Purchases.sharedInstance.logIn(uid, object : com.revenuecat.purchases.interfaces.LogInCallback {
-                                        override fun onReceived(customerInfo: com.revenuecat.purchases.CustomerInfo, created: Boolean) {}
-                                        override fun onError(error: com.revenuecat.purchases.PurchasesError) {
-                                            Log.e("RevenueCat", "Login failed: ${error.message}")
-                                        }
-                                    })
-                                } catch(e: Exception) {
-                                    Log.e("RevenueCat", "Login exception", e)
-                                }
-                            }
+                            SubscriptionManager.syncUser(uid)
+                            com.example.util.AnalyticsHelper.setUserId(uid)
+                            com.example.util.AnalyticsHelper.logEvent("login_google")
                         }
-                        PointsManager.syncFromFirestore()
                         ScanHistoryManager.syncWithFirestore()
                         _uiState.value = LoginUiState.Success
                     } catch (e: GoogleIdTokenParsingException) {
@@ -136,13 +117,15 @@ class LoginViewModel : ViewModel() {
                 } else {
                     _uiState.value = LoginUiState.Error("Unexpected credential type encountered.")
                 }
+            } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                _uiState.value = LoginUiState.Error("No Google account is available. Add one on this device or sign in with email.")
+            } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+                _uiState.value = LoginUiState.Idle
             } catch (e: GetCredentialException) {
-                val msg = e.localizedMessage ?: ""
-                if (msg.contains("16")) {
-                    _uiState.value = LoginUiState.Error("Play Store SHA-1 not configured in Firebase. Copy the SHA-1 from Google Play Console (App Integrity) and add it to Firebase Console.")
-                    return@launch
-                }
-                _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Google Sign-In failed or was cancelled.")
+                Log.w("LoginViewModel", "Google sign-in failed", e)
+                _uiState.value = LoginUiState.Error("Google sign-in could not be completed. Try again or sign in with email.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Firebase Sign-In failed.")
             }
@@ -165,7 +148,7 @@ class LoginViewModel : ViewModel() {
             try {
                 val currentAuthInstance = currentAuth ?: return@launch
                 currentAuthInstance.createUserWithEmailAndPassword(email, pass).await()
-                
+
                 val user = currentAuthInstance.currentUser
                 val profileUpdates = UserProfileChangeRequest.Builder()
                     .setDisplayName(name)
@@ -173,20 +156,10 @@ class LoginViewModel : ViewModel() {
                 user?.updateProfile(profileUpdates)?.await()
 
                 currentAuthInstance.currentUser?.uid?.let { uid ->
-                    if (com.revenuecat.purchases.Purchases.isConfigured) {
-                        try {
-                            com.revenuecat.purchases.Purchases.sharedInstance.logIn(uid, object : com.revenuecat.purchases.interfaces.LogInCallback {
-                                override fun onReceived(customerInfo: com.revenuecat.purchases.CustomerInfo, created: Boolean) {}
-                                override fun onError(error: com.revenuecat.purchases.PurchasesError) {
-                                    Log.e("RevenueCat", "Login failed", Exception(error.message))
-                                }
-                            })
-                        } catch(e: Exception) {
-                            Log.e("RevenueCat", "Login exception", e)
-                        }
-                    }
+                    SubscriptionManager.syncUser(uid)
+                    com.example.util.AnalyticsHelper.setUserId(uid)
+                    com.example.util.AnalyticsHelper.logEvent("sign_up")
                 }
-                PointsManager.syncFromFirestore()
                 ScanHistoryManager.syncWithFirestore()
                 _uiState.value = LoginUiState.Success
             } catch (e: Exception) {
@@ -213,6 +186,57 @@ class LoginViewModel : ViewModel() {
                 _uiState.value = LoginUiState.Message("Password reset email sent. Please check your inbox.")
             } catch (e: Exception) {
                 _uiState.value = LoginUiState.Error(e.localizedMessage ?: "Failed to send reset email")
+            }
+        }
+    }
+
+    fun deleteAccount(context: Context, onComplete: (Boolean, String?) -> Unit) {
+        val currentAuth = try { FirebaseAuth.getInstance() } catch (e: Exception) { null }
+        val user = currentAuth?.currentUser
+        if (user == null) {
+            onComplete(false, "No active user logged in")
+            return
+        }
+
+        val uid = user.uid
+        viewModelScope.launch {
+            try {
+                // Check recent authentication BEFORE removing any user data.
+                val token = user.getIdToken(true).await()
+                val authTime = (token.claims["auth_time"] as? Number)?.toLong() ?: 0L
+                val ageSeconds = System.currentTimeMillis() / 1000 - authTime
+                if (ageSeconds !in 0..300) {
+                    onComplete(false, "Please sign out and sign in again, then delete your account.")
+                    return@launch
+                }
+                val db = FirebaseFirestore.getInstance()
+                val storage = FirebaseStorage.getInstance()
+                // Failures are surfaced; keep the Auth account so cleanup can be retried.
+                com.example.data.AccountDataCleaner.deleteCloudData(db, storage.reference, uid)
+                context.deleteDatabase("flora_scan_database")
+                PlantRepository.getInstance(context).clearLocalData()
+                ScanHistoryManager.clearLocalData()
+                SubscriptionManager.resetUser()
+                val safeUid = uid.replace(Regex("[^A-Za-z0-9_-]"), "_")
+                for (name in listOf("local_plants_$safeUid", "scan_history_$safeUid")) {
+                    context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
+                }
+                val subscriptionPrefs = context.getSharedPreferences("leaflens_subscription_prefs", Context.MODE_PRIVATE)
+                subscriptionPrefs.edit()
+                    .remove("free_scans_count_$safeUid")
+                    .remove("free_scans_date_$safeUid")
+                    .remove("trial_start_time_$safeUid").commit()
+                // The path is a fixed private directory plus a sanitized Firebase UID.
+                java.io.File(context.filesDir, "scans/$safeUid").deleteRecursively()
+                // Delete authentication last so failed cleanup remains retryable.
+                user.delete().await()
+                com.example.util.AnalyticsHelper.setUserId(null)
+                onComplete(true, null)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("LoginViewModel", "Account deletion error", e)
+                onComplete(false, e.localizedMessage ?: "Failed to delete account. Please re-authenticate and try again.")
             }
         }
     }

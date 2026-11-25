@@ -12,7 +12,14 @@ data class ScanHistoryItem(
     val disease: String?,
     val severityLevel: String?,
     val timestamp: Long,
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val description: String = "",
+    val symptoms: String = "",
+    val treatmentSteps: String = "",
+    val careTips: String = "",
+    val healthScore: Int = 100,
+    val wateringLevel: String = "",
+    val sunlight: String = ""
 )
 
 class ScanHistoryViewModel : ViewModel() {

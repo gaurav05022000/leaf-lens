@@ -112,10 +112,22 @@ fun PlantProfileScreen(
                         Box(
                             modifier = Modifier
                                 .size(72.dp)
-                                .background(Color.White, CircleShape),
+                                .clip(CircleShape)
+                                .background(Color.White),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("🌿", fontSize = 36.sp)
+                            if (!livePlant.imageUri.isNullOrEmpty()) {
+                                PlantImage(
+                                    model = livePlant.imageUri,
+                                    contentDescription = livePlant.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            } else {
+                                Text("🌿", fontSize = 36.sp)
+                            }
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -123,24 +135,12 @@ fun PlantProfileScreen(
                             Text(livePlant.species, fontSize = 14.sp, color = TextSecondary)
                         }
                         
-                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Button(
-                                onClick = { plant?.name?.let { onRescanClick(it) } },
-                                colors = ButtonDefaults.buttonColors(containerColor = HeroCardBg),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Rescan")
-                            }
-                            Button(
-                                onClick = { 
-                                    val prompt = "I'm concerned about my ${livePlant.name} (${livePlant.species}). Its health status is currently '${livePlant.healthStatus}'. Can you help?"
-                                    onChatClick(prompt)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Ask AI")
-                            }
+                        Button(
+                            onClick = { plant?.name?.let { onRescanClick(it) } },
+                            colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Rescan")
                         }
                     }
 

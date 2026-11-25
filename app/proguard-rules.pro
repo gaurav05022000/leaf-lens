@@ -26,9 +26,6 @@
 }
 
 # Firestore Data Classes
--keep class com.example.ui.PointsManager$PointTransaction { *; }
--keepclassmembers class com.example.ui.PointsManager$PointTransaction { *; }
-
 -keep class com.example.ui.ScanHistoryItem { *; }
 -keepclassmembers class com.example.ui.ScanHistoryItem { *; }
 
@@ -45,7 +42,7 @@
     volatile <fields>;
 }
 
-# Androidx
+# Androidx & Play Services
 -keep class androidx.lifecycle.** { *; }
 -keep class com.google.android.gms.internal.location.** { *; }
 -keep class com.google.android.gms.** { *; }
